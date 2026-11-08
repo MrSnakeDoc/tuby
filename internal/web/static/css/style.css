@@ -332,12 +332,12 @@ input:focus-visible {
   background: #101116d9;
   backdrop-filter: blur(12px);
 }
-.seen-button img { width: 18px; height: 18px; filter: invert(1); }
+.seen-button img { width: 18px; height: 18px; }
 .seen-button:hover {
   background: #d3c0ff;
   border-color: #d3c0ff;
 }
-.seen-button:hover img { filter: invert(0.85); }
+
 .bookmark-button:hover,
 .bookmark-button[aria-pressed="true"] {
   background: #d3c0ff;
@@ -747,7 +747,7 @@ input:focus-visible {
     text-align: center;
   }
 }
-.top-actions .icon-button img { width: 18px; height: 18px; filter: invert(1); }
+.top-actions .icon-button img { width: 18px; height: 18px; }
 .is-reordering .channel-card { cursor: grab; }
 .is-reordering .channel-card a { pointer-events: none; }
 .is-reordering .channel-card::before { content: ""; position: absolute; inset: 0; border-radius: 20px; background: #51445e; opacity: .18; pointer-events: none; }
