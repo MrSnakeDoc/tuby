@@ -778,3 +778,17 @@ body > .channel-card.is-dragging {
   opacity: 1;
   box-shadow: 0 14px 35px #d3c0ff;
 }
+.channel-search { margin-left: auto; }
+.channel-search input {
+  width: 220px;
+  border: 1px solid #41404a;
+  border-radius: 10px;
+  background: #0e0f15;
+  color: #fff;
+  padding: 11px 13px;
+  font-size: 13px;
+}
+.channel-search input::placeholder { color: #858796; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+@media (max-width: 560px) { .channel-search input { width: 150px; } }
+.channel-card.is-filtered-out { display: none !important; }

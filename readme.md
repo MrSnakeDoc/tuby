@@ -13,7 +13,7 @@ Built with Go, server-rendered HTML, HTMX, and SQLite. No user accounts or exter
 
 ## Features
 
-- **Your channels:** Add YouTube channels by URL or channel ID, and browse their recent uploads.
+- **Your channels:** Add YouTube channels by URL and browse their recent uploads.
 - **Missed:** See videos you haven't marked as watched, with a count in the navigation.
 - **Watch later:** Bookmark videos to revisit, with its own navigation count.
 - **Mark as watched:** Mark individual videos or all videos from a channel as watched.
