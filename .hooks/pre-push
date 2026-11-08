@@ -1,0 +1,54 @@
+#!/bin/sh
+
+set -u
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+
+if [ -z "${GOTMPDIR:-}" ]; then
+  project_name=$(basename "$root")
+  GOTMPDIR="${XDG_CACHE_HOME:-$HOME}/go/${project_name}/tmp"
+  export GOTMPDIR
+fi
+mkdir -p "$GOTMPDIR" || exit 1
+
+scope_input="$GOTMPDIR/mailclown-push-$$.files"
+trap 'rm -f "$scope_input"' EXIT HUP INT TERM
+: >"$scope_input"
+
+empty_tree=$(git hash-object -t tree /dev/null)
+zero_sha=0000000000000000000000000000000000000000
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_sha" ] && continue
+  [ "$local_sha" = "$zero_sha" ] && continue
+
+  if [ "$remote_sha" = "$zero_sha" ]; then
+    git diff --name-only "$empty_tree" "$local_sha" >>"$scope_input"
+    continue
+  fi
+  git diff --name-only "$remote_sha" "$local_sha" >>"$scope_input"
+done
+
+scopes=$("$hook_dir/scopes.sh" <"$scope_input")
+
+if ! printf '%s\n' "$scopes" | grep -qx go; then
+  echo "No pushed Go changes. Skipping Go checks."
+  exit 0
+fi
+
+echo "Running tests..."
+if ! go test ./...; then
+  echo "Error: tests failed. Push aborted."
+  exit 1
+fi
+
+if printf '%s\n' "$scopes" | grep -qx deps; then
+  echo "Running vulnerability scan..."
+  if ! govulncheck ./...; then
+    echo "Error: vulnerabilities found. Push aborted."
+    exit 1
+  fi
+fi

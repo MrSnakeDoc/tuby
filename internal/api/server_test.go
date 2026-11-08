@@ -1,0 +1,123 @@
+package api_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/config"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/web"
+)
+
+func TestRoutesExposeTubyInfrastructure(t *testing.T) {
+	server := newServer()
+	tests := []struct {
+		method string
+		path   string
+		status int
+	}{
+		{method: http.MethodGet, path: "/", status: http.StatusOK},
+		{method: http.MethodHead, path: "/", status: http.StatusOK},
+		{method: http.MethodGet, path: "/healthz", status: http.StatusOK},
+		{method: http.MethodPost, path: "/generate", status: http.StatusNotFound},
+	}
+	for _, test := range tests {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, http.NoBody)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.status, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestHomeRendersTubyPlaceholder(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if contentType := response.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("Content-Type = %q, want HTML", contentType)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Tuby") || strings.Contains(body, "MailClown") {
+		t.Fatalf("homepage body = %q", body)
+	}
+}
+
+func TestHealthzReturnsNoStoreJSON(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+	}
+	var body struct {
+		Service string `json:"service"`
+		Status  string `json:"status"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "ok" || body.Service != "tuby" {
+		t.Fatalf("health response = %+v", body)
+	}
+}
+
+func TestAllowedCIDRSMiddleware(t *testing.T) {
+	server := newServerWithAllowedCIDRS([]string{"10.0.0.0/8"})
+	request := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
+	request.RemoteAddr = "127.0.0.1:8080"
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func TestAllowedCIDRSMiddlewarePermitsMatchingAddress(t *testing.T) {
+	server := newServerWithAllowedCIDRS([]string{"127.0.0.1"})
+	request := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
+	request.RemoteAddr = "127.0.0.1:8080"
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func newServer() *api.Server {
+	return newServerWithAllowedCIDRS(nil)
+}
+
+func newServerWithAllowedCIDRS(allowedCIDRS []string) *api.Server {
+	return api.New(&config.Config{ListenAddr: ":8080", AllowedCIDRS: allowedCIDRS}, testLogger(), testDependencies())
+}
+
+func testLogger() logger.Logger {
+	return logger.New("error", false)
+}
+
+func testDependencies() deps.Deps {
+	templates, err := web.New()
+	if err != nil {
+		panic(err)
+	}
+	return deps.Deps{
+		Templates: templates,
+		StartTime: time.Now(),
+		Version:   "test",
+		Commit:    "test",
+		BuildDate: "test",
+		GoVersion: "test",
+	}
+}

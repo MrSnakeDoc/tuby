@@ -1,0 +1,44 @@
+#!/bin/sh
+
+set -u
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+
+if [ -z "${GOTMPDIR:-}" ]; then
+	project_name=$(basename "$root")
+	GOTMPDIR="${XDG_CACHE_HOME:-$HOME}/go/${project_name}/tmp"
+	export GOTMPDIR
+fi
+mkdir -p "$GOTMPDIR" || exit 1
+
+scopes=$(git diff --cached --name-only --diff-filter=ACDMRT | "$hook_dir/scopes.sh")
+
+if ! printf '%s\n' "$scopes" | grep -qx go; then
+	echo "No staged Go changes. Skipping Go checks."
+	exit 0
+fi
+
+echo "Checking if code compiles..."
+if ! go build ./...; then
+	echo "Error: code does not compile. Commit aborted."
+	exit 1
+fi
+
+echo "Running linters..."
+if ! golangci-lint run --config .golangci.yml; then
+	echo "Error: linting issues detected. Commit aborted."
+	exit 1
+fi
+
+if printf '%s\n' "$scopes" | grep -qx deps; then
+	echo "Running vulnerability scan..."
+	if ! govulncheck ./...; then
+		echo "Error: vulnerabilities found. Commit aborted."
+		exit 1
+	fi
+else
+	echo "Dependencies unchanged. Skipping vulnerability scan."
+fi
