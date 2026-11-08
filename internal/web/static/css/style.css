@@ -459,6 +459,7 @@ input:focus-visible {
   padding: 40px;
   color: #9a97a6;
 }
+.empty-state[hidden] { display: none !important; }
 .empty-state svg {
   width: 31px;
   height: 31px;
