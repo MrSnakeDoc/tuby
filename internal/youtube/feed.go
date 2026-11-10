@@ -21,6 +21,7 @@ type Video struct {
 	URL       string
 	Thumbnail string
 	Published time.Time
+	IsShort   bool
 }
 
 type atomFeed struct {
@@ -109,12 +110,13 @@ func parseEntry(entry atomEntry, channelID string) (Video, bool) {
 		return Video{}, false
 	}
 	url := alternateURL(entry.Links)
-	if url == "" || isShortURL(url) {
+	if url == "" {
 		return Video{}, false
 	}
 	return Video{
 		YouTubeID: entry.VideoID, ChannelID: channelID, Title: strings.TrimSpace(entry.Title),
 		URL: url, Thumbnail: strings.TrimSpace(entry.Thumbnail.URL), Published: entry.Published.UTC(),
+		IsShort: isShortURL(url),
 	}, true
 }
 

@@ -11,10 +11,11 @@ import (
 )
 
 type Subscriptions interface {
-	Add(context.Context, string) (store.Channel, error)
+	Add(context.Context, string, subscription.ContentPreferences) (store.Channel, error)
 	Delete(context.Context, string) error
 	Refresh(context.Context, string) error
 	RefreshAll(context.Context) (subscription.RefreshReport, error)
+	UpdateSettings(context.Context, string, subscription.ContentPreferences) error
 }
 
 type Deps struct {

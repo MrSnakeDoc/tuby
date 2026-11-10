@@ -14,6 +14,7 @@ Built with Go, server-rendered HTML, HTMX, and SQLite. No user accounts or exter
 ## Features
 
 - **Your channels:** Add YouTube channels by URL and browse their recent uploads.
+- **Per-channel content:** Follow long videos, Shorts, or both; long videos remain the preferred source for channel artwork.
 - **Missed:** See videos you haven't marked as watched, with a count in the navigation.
 - **Watch later:** Bookmark videos to revisit, with its own navigation count.
 - **Mark as watched:** Mark individual videos or all videos from a channel as watched.

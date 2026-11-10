@@ -20,7 +20,7 @@ func (s *Store) ChannelContentVersion(ctx context.Context, channelID string) (st
 	}
 	writeVersionValue(hash, title, avatar)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT youtube_id, title, url, thumbnail_url, published_at
+SELECT youtube_id, title, url, thumbnail_url, published_at, is_short
 FROM videos WHERE channel_youtube_id = ? ORDER BY youtube_id`, channelID)
 	if err != nil {
 		return "", fmt.Errorf("load channel videos content version: %w", err)
@@ -28,10 +28,14 @@ FROM videos WHERE channel_youtube_id = ? ORDER BY youtube_id`, channelID)
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var videoID, videoTitle, url, thumbnail, published string
-		if err := rows.Scan(&videoID, &videoTitle, &url, &thumbnail, &published); err != nil {
+		var isShort bool
+		if err := rows.Scan(&videoID, &videoTitle, &url, &thumbnail, &published, &isShort); err != nil {
 			return "", fmt.Errorf("scan channel content version: %w", err)
 		}
 		writeVersionValue(hash, videoID, videoTitle, url, thumbnail, published)
+		if isShort {
+			writeVersionValue(hash, "short")
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return "", fmt.Errorf("iterate channel content version: %w", err)

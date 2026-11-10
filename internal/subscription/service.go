@@ -44,6 +44,11 @@ type RefreshReport struct {
 	Failures  []RefreshFailure
 }
 
+type ContentPreferences struct {
+	IncludeLong   bool
+	IncludeShorts bool
+}
+
 func New(database *store.Store, channelResolver resolver, client feedClient, publishers ...publisher) *Service {
 	var updates publisher
 	if len(publishers) > 0 {
@@ -56,13 +61,23 @@ func NewDefault(database *store.Store, publishers ...publisher) *Service {
 	return New(database, youtube.NewResolver(nil), youtube.NewFeedClient(nil), publishers...)
 }
 
-func (s *Service) Add(ctx context.Context, input string) (store.Channel, error) {
+func (s *Service) Add(ctx context.Context, input string, preferences ContentPreferences) (store.Channel, error) {
+	if err := validatePreferences(preferences); err != nil {
+		return store.Channel{}, err
+	}
 	reference, err := youtube.NormalizeChannelReference(input)
 	if err != nil {
 		return store.Channel{}, err
 	}
 	channelID, err := s.resolve(ctx, reference)
 	if err != nil {
+		return store.Channel{}, err
+	}
+	stored, err := s.store.Channel(ctx, channelID)
+	if err == nil {
+		return stored, nil
+	}
+	if !errors.Is(err, store.ErrChannelNotFound) {
 		return store.Channel{}, err
 	}
 	result, err := s.feeds.Fetch(ctx, channelID, youtube.FetchOptions{})
@@ -72,7 +87,7 @@ func (s *Service) Add(ctx context.Context, input string) (store.Channel, error) 
 	if result.NotModified {
 		return store.Channel{}, fmt.Errorf("initial channel feed must contain content")
 	}
-	if err := s.saveFeed(ctx, reference.SourceURL, channelID, result); err != nil {
+	if err := s.saveFeed(ctx, reference.SourceURL, channelID, preferences, result); err != nil {
 		return store.Channel{}, err
 	}
 	return s.store.Channel(ctx, channelID)
@@ -91,7 +106,8 @@ func (s *Service) Refresh(ctx context.Context, channelID string) error {
 	if result.NotModified {
 		return s.store.RecordNotModified(ctx, channelID, keepValue(result.ETag, channel.FeedETag), keepValue(result.LastModified, channel.FeedLastModified))
 	}
-	if err := s.saveFeed(ctx, channel.SourceURL, channelID, result); err != nil {
+	preferences := ContentPreferences{IncludeLong: channel.IncludeLong, IncludeShorts: channel.IncludeShorts}
+	if err := s.saveFeed(ctx, channel.SourceURL, channelID, preferences, result); err != nil {
 		return err
 	}
 	return nil
@@ -121,6 +137,18 @@ func (s *Service) Delete(ctx context.Context, channelID string) error {
 	return nil
 }
 
+func (s *Service) UpdateSettings(ctx context.Context, channelID string, preferences ContentPreferences) error {
+	if err := validatePreferences(preferences); err != nil {
+		return err
+	}
+	if err := s.store.UpdateChannelSettings(ctx, channelID, preferences.IncludeLong, preferences.IncludeShorts); err != nil {
+		return err
+	}
+	s.publish("channel.settings_changed", channelID)
+	_ = s.Refresh(ctx, channelID)
+	return nil
+}
+
 func (s *Service) resolve(ctx context.Context, reference youtube.ChannelReference) (string, error) {
 	if reference.ID != "" {
 		return reference.ID, nil
@@ -132,7 +160,12 @@ func (s *Service) resolve(ctx context.Context, reference youtube.ChannelReferenc
 	return channelID, nil
 }
 
-func (s *Service) saveFeed(ctx context.Context, sourceURL, channelID string, result youtube.FetchResult) error {
+func (s *Service) saveFeed(
+	ctx context.Context,
+	sourceURL, channelID string,
+	preferences ContentPreferences,
+	result youtube.FetchResult,
+) error {
 	if err := validFeed(result.Feed); err != nil {
 		return err
 	}
@@ -145,12 +178,13 @@ func (s *Service) saveFeed(ctx context.Context, sourceURL, channelID string, res
 	}
 	sync := store.ChannelSync{
 		Channel: store.Channel{
-			YouTubeID: result.Feed.ChannelID,
-			SourceURL: sourceURL,
-			Title:     result.Feed.Title,
-			AvatarURL: result.Feed.AvatarURL,
+			YouTubeID:   result.Feed.ChannelID,
+			SourceURL:   sourceURL,
+			Title:       result.Feed.Title,
+			AvatarURL:   result.Feed.AvatarURL,
+			IncludeLong: preferences.IncludeLong, IncludeShorts: preferences.IncludeShorts,
 		},
-		Videos:      storeVideos(result.Feed.Videos),
+		Videos:      storeVideos(result.Feed.Videos, preferences),
 		ETag:        result.ETag,
 		Modified:    result.LastModified,
 		PurgeBefore: retentionCutoff(),
@@ -204,9 +238,12 @@ func validFeed(feed youtube.Feed) error {
 	return nil
 }
 
-func storeVideos(videos []youtube.Video) []store.Video {
+func storeVideos(videos []youtube.Video, preferences ContentPreferences) []store.Video {
 	stored := make([]store.Video, 0, len(videos))
 	for _, video := range videos {
+		if video.IsShort && !preferences.IncludeShorts || !video.IsShort && !preferences.IncludeLong {
+			continue
+		}
 		stored = append(stored, store.Video{
 			YouTubeID:        video.YouTubeID,
 			ChannelYouTubeID: video.ChannelID,
@@ -214,9 +251,17 @@ func storeVideos(videos []youtube.Video) []store.Video {
 			URL:              video.URL,
 			ThumbnailURL:     video.Thumbnail,
 			PublishedAt:      video.Published,
+			IsShort:          video.IsShort,
 		})
 	}
 	return stored
+}
+
+func validatePreferences(preferences ContentPreferences) error {
+	if !preferences.IncludeLong && !preferences.IncludeShorts {
+		return fmt.Errorf("at least one video type must be enabled")
+	}
+	return nil
 }
 
 func backoff(failures int) time.Duration {

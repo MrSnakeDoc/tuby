@@ -8,22 +8,29 @@ import (
 )
 
 func (s *Store) SaveChannel(ctx context.Context, channel Channel) error {
+	if !channel.IncludeLong && !channel.IncludeShorts {
+		channel.IncludeLong = true
+	}
 	if err := validateChannel(channel); err != nil {
 		return err
 	}
 	channel = channelWithTimestamps(channel, time.Now())
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO channels(youtube_id, source_url, title, avatar_url, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?)
+INSERT INTO channels(youtube_id, source_url, title, avatar_url, include_long, include_shorts, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(youtube_id) DO UPDATE SET
     source_url = excluded.source_url,
     title = excluded.title,
     avatar_url = excluded.avatar_url,
+	include_long = excluded.include_long,
+	include_shorts = excluded.include_shorts,
     updated_at = excluded.updated_at`,
 		channel.YouTubeID,
 		channel.SourceURL,
 		channel.Title,
 		channel.AvatarURL,
+		channel.IncludeLong,
+		channel.IncludeShorts,
 		formatTime(channel.CreatedAt),
 		formatTime(channel.UpdatedAt),
 	)

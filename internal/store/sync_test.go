@@ -164,7 +164,7 @@ func TestSaveSyncDeletesPreviouslyStoredShorts(t *testing.T) {
 		Channel: Channel{YouTubeID: "UC123", SourceURL: "https://www.youtube.com/@example", Title: "Example"},
 		Videos: []Video{{
 			YouTubeID: "short", ChannelYouTubeID: "UC123", Title: "Short",
-			URL: "https://www.youtube.com/shorts/short", PublishedAt: now,
+			URL: "https://www.youtube.com/shorts/short", PublishedAt: now, IsShort: true,
 		}},
 	}
 	if err := database.SaveSync(context.Background(), sync); err != nil {
@@ -176,6 +176,42 @@ func TestSaveSyncDeletesPreviouslyStoredShorts(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("Short videos = %d, want 0", count)
+	}
+}
+
+func TestChannelThumbnailsPreferLongVideosAndFallbackToShorts(t *testing.T) {
+	database := openStore(t, filepath.Join(t.TempDir(), "tuby.sqlite"))
+	t.Cleanup(func() { closeStore(t, database) })
+	now := time.Now().UTC()
+	sync := ChannelSync{
+		Channel: Channel{
+			YouTubeID: "UC123", SourceURL: "https://www.youtube.com/@example", Title: "Example",
+			IncludeLong: true, IncludeShorts: true,
+		},
+		Videos: []Video{
+			{YouTubeID: "long", ChannelYouTubeID: "UC123", Title: "Long", URL: "https://youtube.com/watch?v=long", ThumbnailURL: "long.jpg", PublishedAt: now},
+			{YouTubeID: "short", ChannelYouTubeID: "UC123", Title: "Short", URL: "https://youtube.com/shorts/short", ThumbnailURL: "short.jpg", PublishedAt: now.Add(time.Minute), IsShort: true},
+		},
+	}
+	if err := database.SaveSync(context.Background(), sync); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err := database.ChannelSummaries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || len(summaries[0].ThumbnailURLs) != 1 || summaries[0].ThumbnailURLs[0] != "long.jpg" {
+		t.Fatalf("summaries = %#v", summaries)
+	}
+	if _, err := database.db.Exec(`DELETE FROM videos WHERE is_short = 0`); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err = database.ChannelSummaries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries[0].ThumbnailURLs) != 1 || summaries[0].ThumbnailURLs[0] != "short.jpg" {
+		t.Fatalf("fallback thumbnails = %#v", summaries[0].ThumbnailURLs)
 	}
 }
 

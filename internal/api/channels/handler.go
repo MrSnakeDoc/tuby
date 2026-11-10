@@ -43,7 +43,7 @@ func newHandler(subscriptions deps.Subscriptions, updates *events.Hub, stores ..
 }
 
 func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
-	_, err := h.subscriptions.Add(request.Context(), request.FormValue("url"))
+	_, err := h.subscriptions.Add(request.Context(), request.FormValue("url"), contentPreferences(request))
 	if err != nil {
 		respond.Error(writer, http.StatusBadRequest, "add channel failed")
 		return
@@ -51,6 +51,20 @@ func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("HX-Redirect", "/")
 	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusCreated)
+}
+
+func (h *handler) updateSettings(writer http.ResponseWriter, request *http.Request) {
+	err := h.subscriptions.UpdateSettings(
+		request.Context(),
+		chi.URLParam(request, "channelID"),
+		contentPreferences(request),
+	)
+	if err != nil {
+		respond.Error(writer, http.StatusBadRequest, "update channel settings failed")
+		return
+	}
+	triggerUpdate(writer)
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) saveOrder(writer http.ResponseWriter, request *http.Request) {
@@ -149,6 +163,13 @@ func (h *handler) publish(update events.Update) {
 
 func triggerUpdate(writer http.ResponseWriter) {
 	writer.Header().Set("HX-Trigger", "tuby:update")
+}
+
+func contentPreferences(request *http.Request) subscription.ContentPreferences {
+	return subscription.ContentPreferences{
+		IncludeLong:   request.FormValue("include_long") != "",
+		IncludeShorts: request.FormValue("include_shorts") != "",
+	}
 }
 
 func respondChannelError(writer http.ResponseWriter, err error) {

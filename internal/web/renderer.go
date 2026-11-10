@@ -33,6 +33,8 @@ type ChannelCard struct {
 	ID, Title, ImageURL     string
 	ThumbnailURLs           []string
 	VideoCount, UnseenCount int
+	IncludeLong             bool
+	IncludeShorts           bool
 }
 type VideoCard struct {
 	ID, ChannelID, ChannelTitle, Title, URL, ThumbnailURL string

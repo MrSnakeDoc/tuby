@@ -14,7 +14,7 @@ import (
 func TestAddSavesChannelAndInitialVideosAsUnseen(t *testing.T) {
 	database := openTestStore(t)
 	service := New(database, testResolver{}, &testFeedClient{result: feedResult()})
-	channel, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA")
+	channel, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestRefreshUsesValidatorsAndPreservesVideoStates(t *testing.T) {
 	database := openTestStore(t)
 	initial := &testFeedClient{result: feedResult()}
 	service := New(database, testResolver{}, initial)
-	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA"); err != nil {
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
 		t.Fatal(err)
 	}
 	refresh := &testFeedClient{result: youtube.FetchResult{NotModified: true, ETag: "etag-2"}}
@@ -50,7 +50,7 @@ func TestRefreshUsesValidatorsAndPreservesVideoStates(t *testing.T) {
 func TestRefreshRecordsFailureAndKeepsVideos(t *testing.T) {
 	database := openTestStore(t)
 	service := New(database, testResolver{}, &testFeedClient{result: feedResult()})
-	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA"); err != nil {
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
 		t.Fatal(err)
 	}
 	service = New(database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")})
@@ -84,6 +84,85 @@ func TestRefreshAllRefreshesEveryStoredChannel(t *testing.T) {
 	}
 	if report.Refreshed != 2 || len(report.Failures) != 0 || client.calls != 2 {
 		t.Fatalf("report %#v, calls %d", report, client.calls)
+	}
+}
+
+func TestAddStoresOnlySelectedVideoTypes(t *testing.T) {
+	database := openTestStore(t)
+	result := feedResult()
+	result.Feed.Videos = append(result.Feed.Videos, shortVideo())
+	service := New(database, testResolver{}, &testFeedClient{result: result})
+	preferences := ContentPreferences{IncludeShorts: true}
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", preferences); err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(videos) != 1 || !videos[0].IsShort {
+		t.Fatalf("videos = %#v", videos)
+	}
+}
+
+func TestAddExistingChannelPreservesSettingsAndVideoState(t *testing.T) {
+	database := openTestStore(t)
+	client := &testFeedClient{result: feedResult()}
+	service := New(database, testResolver{}, client)
+	ctx := context.Background()
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetVideoWatchLater(ctx, "abcdefghijk", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{IncludeShorts: true}); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := database.Channel(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(ctx, channel.YouTubeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 || !channel.IncludeLong || channel.IncludeShorts || !videos[0].WatchLater || !videos[0].Unseen {
+		t.Fatalf("calls %d, channel %#v, video %#v", client.calls, channel, videos[0])
+	}
+}
+
+func TestUpdateSettingsPersistsAndPurgesDisabledVideosWhenRefreshFails(t *testing.T) {
+	database := openTestStore(t)
+	result := feedResult()
+	result.Feed.Videos = append(result.Feed.Videos, shortVideo())
+	service := New(database, testResolver{}, &testFeedClient{result: result})
+	ctx := context.Background()
+	both := ContentPreferences{IncludeLong: true, IncludeShorts: true}
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", both); err != nil {
+		t.Fatal(err)
+	}
+	service = New(database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")})
+	if err := service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := database.Channel(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(ctx, channel.YouTubeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !channel.IncludeLong || channel.IncludeShorts || len(videos) != 1 || videos[0].IsShort {
+		t.Fatalf("channel %#v, videos %#v", channel, videos)
+	}
+}
+
+func TestContentPreferencesRequireOneVideoType(t *testing.T) {
+	service := New(openTestStore(t), testResolver{}, &testFeedClient{result: feedResult()})
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{}); err == nil {
+		t.Fatal("Add succeeded without a selected video type")
 	}
 }
 
@@ -139,5 +218,17 @@ func feedResult() youtube.FetchResult {
 			}},
 		},
 		ETag: "etag-1", LastModified: "last-modified-1",
+	}
+}
+
+func longOnly() ContentPreferences {
+	return ContentPreferences{IncludeLong: true}
+}
+
+func shortVideo() youtube.Video {
+	return youtube.Video{
+		YouTubeID: "shortvideo1", ChannelID: "UCHnyfMqiRRG1u-2MsSQLbXA", Title: "A Short",
+		URL: "https://www.youtube.com/shorts/shortvideo1", Thumbnail: "https://example.com/short.jpg",
+		Published: time.Date(2026, time.November, 9, 12, 0, 0, 0, time.UTC), IsShort: true,
 	}
 }

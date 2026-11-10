@@ -30,7 +30,7 @@
   };
 
   const refresh = async () => {
-    if (!pending || refreshing || document.hidden || document.querySelector('.is-reordering')) return;
+    if (!pending || refreshing || document.hidden || document.querySelector('.is-reordering') || document.querySelector('dialog[open]')) return;
     pending = false;
     refreshing = true;
     const search = document.querySelector('#channel-search')?.value ?? '';
@@ -78,4 +78,5 @@
   });
   document.addEventListener('tuby:update', scheduleRefresh);
   document.addEventListener('tuby:reorder-finished', refresh);
+  document.addEventListener('close', refresh, true);
 })();

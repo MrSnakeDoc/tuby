@@ -14,15 +14,16 @@ func (s *Store) SaveVideo(ctx context.Context, video Video) error {
 	}
 	video = videoWithTimestamps(video, time.Now())
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO videos(youtube_id, channel_youtube_id, title, url, thumbnail_url, published_at, discovered_at, last_seen_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO videos(youtube_id, channel_youtube_id, title, url, thumbnail_url, published_at, discovered_at, last_seen_at, is_short)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(youtube_id) DO UPDATE SET
     channel_youtube_id = excluded.channel_youtube_id,
     title = excluded.title,
     url = excluded.url,
     thumbnail_url = excluded.thumbnail_url,
     published_at = excluded.published_at,
-    last_seen_at = excluded.last_seen_at`,
+    last_seen_at = excluded.last_seen_at,
+    is_short = excluded.is_short`,
 		video.YouTubeID,
 		video.ChannelYouTubeID,
 		video.Title,
@@ -31,6 +32,7 @@ ON CONFLICT(youtube_id) DO UPDATE SET
 		formatTime(video.PublishedAt),
 		formatTime(video.DiscoveredAt),
 		formatTime(video.LastSeenAt),
+		video.IsShort,
 	)
 	if err != nil {
 		return fmt.Errorf("save video %q: %w", video.YouTubeID, err)

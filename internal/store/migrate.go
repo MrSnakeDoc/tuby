@@ -52,6 +52,12 @@ CREATE INDEX videos_watch_later_published_at_idx ON videos(watch_later, publishe
 		query: `ALTER TABLE channels ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
 UPDATE channels SET position = rowid WHERE position = 0;`,
 	},
+	{
+		version: 3,
+		query: `ALTER TABLE channels ADD COLUMN include_long INTEGER NOT NULL DEFAULT 1 CHECK (include_long IN (0, 1));
+ALTER TABLE channels ADD COLUMN include_shorts INTEGER NOT NULL DEFAULT 0 CHECK (include_shorts IN (0, 1));
+ALTER TABLE videos ADD COLUMN is_short INTEGER NOT NULL DEFAULT 0 CHECK (is_short IN (0, 1));`,
+	},
 }
 
 func (s *Store) initialize() error {

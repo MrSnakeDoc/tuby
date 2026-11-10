@@ -14,6 +14,8 @@ type Channel struct {
 	NextCheckAt        *time.Time
 	FailureCount       int
 	LastError          string
+	IncludeLong        bool
+	IncludeShorts      bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -30,6 +32,7 @@ type Video struct {
 	Unseen           bool
 	WatchLater       bool
 	WatchedAt        *time.Time
+	IsShort          bool
 }
 
 type ChannelSummary struct {

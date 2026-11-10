@@ -11,7 +11,7 @@ func (s *Store) ChannelSummaries(ctx context.Context) ([]ChannelSummary, error) 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT c.youtube_id, c.source_url, c.title, c.avatar_url, c.feed_etag, c.feed_last_modified,
        c.last_checked_at, c.last_successful_sync_at, c.next_check_at, c.failure_count,
-       c.last_error, c.created_at, c.updated_at, COUNT(v.youtube_id),
+       c.last_error, c.include_long, c.include_shorts, c.created_at, c.updated_at, COUNT(v.youtube_id),
        COALESCE(SUM(v.unseen), 0), COALESCE(NULLIF(c.avatar_url, ''), (
            SELECT thumbnail_url FROM videos latest WHERE latest.channel_youtube_id = c.youtube_id
            ORDER BY published_at DESC LIMIT 1), '')
@@ -27,7 +27,8 @@ GROUP BY c.youtube_id ORDER BY c.position ASC`)
 		var created, updated string
 		if err := rows.Scan(&summary.YouTubeID, &summary.SourceURL, &summary.Title, &summary.AvatarURL,
 			&summary.FeedETag, &summary.FeedLastModified, &lastChecked, &lastSuccessful, &nextCheck,
-			&summary.FailureCount, &summary.LastError, &created, &updated, &summary.VideoCount,
+			&summary.FailureCount, &summary.LastError, &summary.IncludeLong, &summary.IncludeShorts,
+			&created, &updated, &summary.VideoCount,
 			&summary.UnseenCount, &summary.ImageURL); err != nil {
 			return nil, fmt.Errorf("scan channel summary: %w", err)
 		}
@@ -56,7 +57,24 @@ GROUP BY c.youtube_id ORDER BY c.position ASC`)
 }
 
 func (s *Store) channelThumbnails(ctx context.Context, channelID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT thumbnail_url FROM videos WHERE channel_youtube_id = ? AND thumbnail_url != '' ORDER BY published_at DESC`, channelID)
+	result, err := s.thumbnailsByType(ctx, channelID, false)
+	if err != nil || len(result) > 0 {
+		return result, err
+	}
+	var hasLong bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM videos WHERE channel_youtube_id = ? AND is_short = 0)`, channelID).Scan(&hasLong); err != nil {
+		return nil, err
+	}
+	if hasLong {
+		return result, nil
+	}
+	return s.thumbnailsByType(ctx, channelID, true)
+}
+
+func (s *Store) thumbnailsByType(ctx context.Context, channelID string, shorts bool) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT thumbnail_url FROM videos
+WHERE channel_youtube_id = ? AND is_short = ? AND thumbnail_url != '' ORDER BY published_at DESC`, channelID, shorts)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +120,7 @@ func (s *Store) SetVideoWatchLater(ctx context.Context, videoID string, enabled 
 
 func (s *Store) videos(ctx context.Context, clause string, args ...any) ([]Video, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT youtube_id, channel_youtube_id, title, url, thumbnail_url,
-published_at, discovered_at, last_seen_at, unseen, watch_later, watched_at FROM videos `+clause+` ORDER BY published_at DESC`, args...)
+published_at, discovered_at, last_seen_at, unseen, watch_later, watched_at, is_short FROM videos `+clause+` ORDER BY published_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list videos: %w", err)
 	}
@@ -123,7 +141,7 @@ func scanVideo(row interface{ Scan(...any) error }) (Video, error) {
 	var published, discovered, seen string
 	var watched sql.NullString
 	if err := row.Scan(&video.YouTubeID, &video.ChannelYouTubeID, &video.Title, &video.URL, &video.ThumbnailURL,
-		&published, &discovered, &seen, &video.Unseen, &video.WatchLater, &watched); err != nil {
+		&published, &discovered, &seen, &video.Unseen, &video.WatchLater, &watched, &video.IsShort); err != nil {
 		return Video{}, fmt.Errorf("scan video: %w", err)
 	}
 	var err error

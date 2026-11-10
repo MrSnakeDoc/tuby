@@ -33,14 +33,14 @@ func TestParseFeedRejectsInvalidChannelID(t *testing.T) {
 	}
 }
 
-func TestParseFeedExcludesShorts(t *testing.T) {
+func TestParseFeedClassifiesShorts(t *testing.T) {
 	document := strings.ReplaceAll(testFeedXML, "https://www.youtube.com/watch?v=abcdefghijk", "https://www.youtube.com/shorts/abcdefghijk")
 	feed, err := ParseFeed([]byte(document))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(feed.Videos) != 0 {
-		t.Fatalf("videos = %d, want 0", len(feed.Videos))
+	if len(feed.Videos) != 1 || !feed.Videos[0].IsShort {
+		t.Fatalf("videos = %#v, want one Short", feed.Videos)
 	}
 }
 

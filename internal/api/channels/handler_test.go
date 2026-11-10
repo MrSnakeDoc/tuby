@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -65,6 +66,22 @@ func TestFetchAllRouteReportsPartialFailures(t *testing.T) {
 	}
 }
 
+func TestUpdateSettingsBindsSelectedVideoTypes(t *testing.T) {
+	service := &stubSubscriptions{}
+	router := newRouter(service)
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/channels/UC123/settings",
+		strings.NewReader("include_shorts=on"),
+	)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || service.settings.IncludeLong || !service.settings.IncludeShorts {
+		t.Fatalf("status %d, settings %#v", response.Code, service.settings)
+	}
+}
+
 func newRouter(service deps.Subscriptions) http.Handler {
 	router := chi.NewRouter()
 	Register(router, deps.Deps{Subscriptions: service})
@@ -78,6 +95,7 @@ type stubSubscriptions struct {
 	refreshErr error
 	report     subscription.RefreshReport
 	reportErr  error
+	settings   subscription.ContentPreferences
 }
 
 func (s *stubSubscriptions) Delete(_ context.Context, channelID string) error {
@@ -85,8 +103,13 @@ func (s *stubSubscriptions) Delete(_ context.Context, channelID string) error {
 	return s.deleteErr
 }
 
-func (s *stubSubscriptions) Add(context.Context, string) (store.Channel, error) {
+func (s *stubSubscriptions) Add(context.Context, string, subscription.ContentPreferences) (store.Channel, error) {
 	return store.Channel{}, nil
+}
+
+func (s *stubSubscriptions) UpdateSettings(_ context.Context, _ string, settings subscription.ContentPreferences) error {
+	s.settings = settings
+	return nil
 }
 
 func (s *stubSubscriptions) Refresh(_ context.Context, channelID string) error {

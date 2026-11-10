@@ -90,6 +90,7 @@ func channelCards(summaries []store.ChannelSummary) []web.ChannelCard {
 		result = append(result, web.ChannelCard{
 			ID: value.YouTubeID, Title: value.Title, ImageURL: value.ImageURL,
 			ThumbnailURLs: value.ThumbnailURLs, VideoCount: value.VideoCount, UnseenCount: value.UnseenCount,
+			IncludeLong: value.IncludeLong, IncludeShorts: value.IncludeShorts,
 		})
 	}
 	return result
