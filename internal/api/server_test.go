@@ -57,6 +57,11 @@ func TestHomeRendersTubyPlaceholder(t *testing.T) {
 		!strings.Contains(body, `/static/js/live-updates.js?v=test-build`) {
 		t.Fatalf("homepage does not expose the current build")
 	}
+	if !strings.Contains(body, `/static/img/home.svg?v=test-build`) ||
+		!strings.Contains(body, `/static/img/clock-alert.svg?v=test-build`) ||
+		!strings.Contains(body, `/static/img/bookmark.svg?v=test-build`) {
+		t.Fatalf("homepage does not render the dock icons")
+	}
 	if response.Header().Get("Cache-Control") != "no-cache, no-store, must-revalidate" {
 		t.Fatalf("Cache-Control = %q", response.Header().Get("Cache-Control"))
 	}

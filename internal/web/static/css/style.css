@@ -594,9 +594,11 @@ select:focus-visible,
   bottom: max(25px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
   gap: 3px;
+  width: min(470px, calc(100% - 20px));
   padding: 6px;
   border: 1px solid #45404e;
   background: #22212bea;
@@ -610,9 +612,10 @@ select:focus-visible,
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  min-width: 0;
+  gap: 6px;
   border-radius: 999px;
-  padding: 13px 18px;
+  padding: 13px 10px;
   color: #aaa6b3;
   font-size: 13px;
   font-weight: 700;
@@ -628,7 +631,8 @@ select:focus-visible,
   background: #51445e;
   color: #fff;
 }
-.dock-link svg {
+.dock-link svg,
+.dock-link img {
   width: 17px;
   height: 17px;
 }
@@ -637,11 +641,12 @@ select:focus-visible,
   color: #1d1629;
   background: #cbb7f6;
   border-radius: 99px;
-  min-width: 19px;
+  width: 27px;
+  min-width: 27px;
   height: 19px;
   display: grid;
   place-items: center;
-  padding: 0 5px;
+  padding: 0;
 }
 .dock-count:empty,
 .dock-count[data-zero="true"] {
@@ -965,18 +970,22 @@ select:focus-visible,
   }
   .dock {
     bottom: max(15px, env(safe-area-inset-bottom));
-    width: max-content;
-    max-width: calc(100% - 20px);
     padding: 5px;
   }
   .dock-link {
-    padding: 12px 11px;
-    gap: 6px;
+    padding: 12px 4px;
+    gap: 4px;
     font-size: 11px;
   }
-  .dock-link svg {
+  .dock-link svg,
+  .dock-link img {
     width: 16px;
     height: 16px;
+  }
+  .dock-count {
+    width: 24px;
+    min-width: 24px;
+    font-size: 9px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

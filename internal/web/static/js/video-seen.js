@@ -22,6 +22,7 @@
   function updateMissedCount() {
     const badge = document.querySelector('#missed-count');
     if (!badge) return;
+    if (badge.textContent.trim().endsWith('+')) return;
     const count = Number(badge.textContent) - 1;
     badge.textContent = String(Math.max(0, count));
     badge.hidden = count <= 0;

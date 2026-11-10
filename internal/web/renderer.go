@@ -53,7 +53,9 @@ type VideoCard struct {
 }
 
 func New() (*Renderer, error) {
-	templates, err := template.New("index.html").Funcs(template.FuncMap{"timeAgo": timeAgo, "thumbnailJSON": thumbnailJSON}).ParseFS(assets, "templates/*.html")
+	templates, err := template.New("index.html").Funcs(template.FuncMap{
+		"timeAgo": timeAgo, "thumbnailJSON": thumbnailJSON, "compactCount": compactCount,
+	}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
@@ -65,6 +67,13 @@ func New() (*Renderer, error) {
 		templates: templates,
 		static:    http.FileServer(http.FS(staticFiles)),
 	}, nil
+}
+
+func compactCount(value int) string {
+	if value > 99 {
+		return "99+"
+	}
+	return fmt.Sprintf("%d", value)
 }
 
 func thumbnailJSON(values []string) string {
