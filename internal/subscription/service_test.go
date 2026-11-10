@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/youtube"
 )
@@ -107,16 +108,27 @@ func TestAddStoresOnlySelectedVideoTypes(t *testing.T) {
 
 func TestAddExistingChannelPreservesSettingsAndVideoState(t *testing.T) {
 	database := openTestStore(t)
+	ctx := context.Background()
+	selected, err := database.CreateCategory(ctx, "Selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignored, err := database.CreateCategory(ctx, "Ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := &testFeedClient{result: feedResult()}
 	service := New(database, testResolver{}, client)
-	ctx := context.Background()
-	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+	initial := longOnly()
+	initial.CategoryID = selected.ID
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", initial); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.SetVideoWatchLater(ctx, "abcdefghijk", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{IncludeShorts: true}); err != nil {
+	duplicate := ContentPreferences{IncludeShorts: true, CategoryID: ignored.ID}
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", duplicate); err != nil {
 		t.Fatal(err)
 	}
 	channel, err := database.Channel(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
@@ -127,7 +139,8 @@ func TestAddExistingChannelPreservesSettingsAndVideoState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.calls != 1 || !channel.IncludeLong || channel.IncludeShorts || !videos[0].WatchLater || !videos[0].Unseen {
+	if client.calls != 1 || channel.CategoryID != selected.ID || !channel.IncludeLong || channel.IncludeShorts ||
+		!videos[0].WatchLater || !videos[0].Unseen {
 		t.Fatalf("calls %d, channel %#v, video %#v", client.calls, channel, videos[0])
 	}
 }
@@ -138,12 +151,19 @@ func TestUpdateSettingsPersistsAndPurgesDisabledVideosWhenRefreshFails(t *testin
 	result.Feed.Videos = append(result.Feed.Videos, shortVideo())
 	service := New(database, testResolver{}, &testFeedClient{result: result})
 	ctx := context.Background()
+	category, err := database.CreateCategory(ctx, "Science")
+	if err != nil {
+		t.Fatal(err)
+	}
 	both := ContentPreferences{IncludeLong: true, IncludeShorts: true}
 	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", both); err != nil {
 		t.Fatal(err)
 	}
-	service = New(database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")})
-	if err := service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+	updates := &testPublisher{}
+	service = New(database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")}, updates)
+	updated := longOnly()
+	updated.CategoryID = category.ID
+	if err := service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", updated); err != nil {
 		t.Fatal(err)
 	}
 	channel, err := database.Channel(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
@@ -154,8 +174,29 @@ func TestUpdateSettingsPersistsAndPurgesDisabledVideosWhenRefreshFails(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !channel.IncludeLong || channel.IncludeShorts || len(videos) != 1 || videos[0].IsShort {
+	if channel.CategoryID != category.ID || !channel.IncludeLong || channel.IncludeShorts ||
+		len(videos) != 1 || videos[0].IsShort {
 		t.Fatalf("channel %#v, videos %#v", channel, videos)
+	}
+	if len(updates.values) == 0 {
+		t.Fatal("settings update was not published")
+	}
+	published := updates.values[0]
+	if published.Reason != "channel.settings_changed" || len(published.CategoryIDs) != 1 ||
+		published.CategoryIDs[0] != category.ID {
+		t.Fatalf("published update = %#v", published)
+	}
+}
+
+func TestAddRejectsUnknownCategoryBeforeFetching(t *testing.T) {
+	database := openTestStore(t)
+	client := &testFeedClient{result: feedResult()}
+	service := New(database, testResolver{}, client)
+	preferences := longOnly()
+	preferences.CategoryID = 999
+	_, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", preferences)
+	if !errors.Is(err, store.ErrCategoryNotFound) || client.calls != 0 {
+		t.Fatalf("error = %v, fetch calls = %d", err, client.calls)
 	}
 }
 
@@ -186,6 +227,12 @@ func openTestStore(t *testing.T) *store.Store {
 }
 
 type testResolver struct{}
+
+type testPublisher struct{ values []events.Update }
+
+func (p *testPublisher) Publish(update events.Update) {
+	p.values = append(p.values, update)
+}
 
 func (testResolver) ResolveChannelID(context.Context, string) (string, error) {
 	return "UCHnyfMqiRRG1u-2MsSQLbXA", nil

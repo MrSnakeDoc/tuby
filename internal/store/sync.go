@@ -22,7 +22,7 @@ func (s *Store) Channel(ctx context.Context, channelID string) (Channel, error) 
 	row := s.db.QueryRowContext(ctx, `
 SELECT youtube_id, source_url, title, avatar_url, feed_etag, feed_last_modified,
        last_checked_at, last_successful_sync_at, next_check_at, failure_count,
-       last_error, include_long, include_shorts, created_at, updated_at
+       last_error, include_long, include_shorts, category_id, position, created_at, updated_at
 FROM channels WHERE youtube_id = ?`, channelID)
 	channel, err := scanChannel(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -38,7 +38,7 @@ func (s *Store) Channels(ctx context.Context) ([]Channel, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT youtube_id, source_url, title, avatar_url, feed_etag, feed_last_modified,
        last_checked_at, last_successful_sync_at, next_check_at, failure_count,
-       last_error, include_long, include_shorts, created_at, updated_at
+       last_error, include_long, include_shorts, category_id, position, created_at, updated_at
 FROM channels ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
@@ -67,6 +67,7 @@ func (s *Store) DeleteChannel(ctx context.Context, channelID string) error {
 }
 
 func (s *Store) SaveSync(ctx context.Context, sync ChannelSync) error {
+	sync.Channel = channelWithDefaultCategory(sync.Channel)
 	if !sync.Channel.IncludeLong && !sync.Channel.IncludeShorts {
 		sync.Channel.IncludeLong = true
 	}
@@ -123,8 +124,9 @@ func saveSync(transaction *sql.Tx, sync ChannelSync, now time.Time) error {
 	_, err := transaction.Exec(`
 INSERT INTO channels(youtube_id, source_url, title, avatar_url, feed_etag, feed_last_modified,
     last_checked_at, last_successful_sync_at, next_check_at, failure_count, last_error,
-    include_long, include_shorts, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', ?, ?, ?, ?)
+    include_long, include_shorts, category_id, position, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', ?, ?, ?,
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM channels WHERE category_id = ?), ?, ?)
 ON CONFLICT(youtube_id) DO UPDATE SET source_url = excluded.source_url, title = excluded.title,
     avatar_url = excluded.avatar_url, feed_etag = excluded.feed_etag,
     feed_last_modified = excluded.feed_last_modified, last_checked_at = excluded.last_checked_at,
@@ -132,7 +134,7 @@ ON CONFLICT(youtube_id) DO UPDATE SET source_url = excluded.source_url, title = 
     failure_count = 0, last_error = '', updated_at = excluded.updated_at`,
 		channel.YouTubeID, channel.SourceURL, channel.Title, channel.AvatarURL, sync.ETag,
 		sync.Modified, formatTime(now), formatTime(now), channel.IncludeLong, channel.IncludeShorts,
-		formatTime(channel.CreatedAt), formatTime(now))
+		channel.CategoryID, channel.CategoryID, formatTime(channel.CreatedAt), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("save channel %q during sync: %w", channel.YouTubeID, err)
 	}
@@ -221,7 +223,8 @@ func scanChannel(row rowScanner) (Channel, error) {
 	var created, updated string
 	err := row.Scan(&channel.YouTubeID, &channel.SourceURL, &channel.Title, &channel.AvatarURL,
 		&channel.FeedETag, &channel.FeedLastModified, &lastChecked, &lastSuccessful, &nextCheck,
-		&channel.FailureCount, &channel.LastError, &channel.IncludeLong, &channel.IncludeShorts, &created, &updated)
+		&channel.FailureCount, &channel.LastError, &channel.IncludeLong, &channel.IncludeShorts,
+		&channel.CategoryID, &channel.Position, &created, &updated)
 	if err != nil {
 		return Channel{}, err
 	}

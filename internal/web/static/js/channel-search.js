@@ -2,20 +2,20 @@
   const normalize = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
   window.tubyFilterChannels = input => {
-    const grid = document.querySelector('.channel-grid');
+    const list = document.querySelector('.category-list');
     const empty = document.querySelector('#channel-search-empty');
-    if (!grid || !empty) return;
+    if (!list || !empty) return;
     const query = normalize(input.value.trim());
     let visible = 0;
-    grid.querySelectorAll('.channel-card').forEach(card => {
+    list.classList.toggle('is-searching', query !== '');
+    list.querySelectorAll('.channel-card').forEach(card => {
       const name = card.querySelector('.channel-name')?.textContent ?? '';
       const matches = normalize(name).includes(query);
-      card.style.setProperty('display', matches ? 'block' : 'none', 'important');
+      card.classList.toggle('is-filtered-out', !matches);
       if (matches) visible++;
     });
     const showEmpty = visible === 0 && query !== '';
     empty.hidden = !showEmpty;
-    empty.style.setProperty('display', showEmpty ? 'flex' : 'none', 'important');
   };
 
   document.addEventListener('keydown', event => {

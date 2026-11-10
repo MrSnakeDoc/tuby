@@ -4,6 +4,8 @@ import "time"
 
 type Channel struct {
 	YouTubeID          string
+	CategoryID         int64
+	Position           int
 	SourceURL          string
 	Title              string
 	AvatarURL          string
@@ -18,6 +20,13 @@ type Channel struct {
 	IncludeShorts      bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+type Category struct {
+	ID        int64
+	Name      string
+	Position  int
+	IsDefault bool
 }
 
 type Video struct {

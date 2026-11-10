@@ -25,6 +25,7 @@ type Deps struct {
 	Updates       *events.Hub
 	StartTime     time.Time
 	Version       string
+	BuildID       string
 	Commit        string
 	BuildDate     string
 	GoVersion     string

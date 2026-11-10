@@ -4,7 +4,19 @@
   let refreshing = false;
   let lastRevision = -1;
   let latestUpdate;
+  let reloading = false;
   const deletedChannels = new Set();
+  const documentBuild = document.querySelector('meta[name="tuby-build"]')?.content ?? '';
+
+  window.tubyBuildHeaders = () => ({'X-Tuby-Build': documentBuild});
+  window.tubyReloadIfStale = response => {
+    if (response.headers.get('HX-Refresh') === 'true') reloadPage();
+    return response;
+  };
+
+  document.addEventListener('htmx:configRequest', event => {
+    Object.assign(event.detail.headers, window.tubyBuildHeaders());
+  });
 
   const source = new EventSource('/api/events');
   source.addEventListener('update', event => {
@@ -14,14 +26,29 @@
     } catch {
       return;
     }
-    if (update.reason !== 'sync' && update.revision <= lastRevision) return;
-    lastRevision = Math.max(lastRevision, update.revision);
+    if (update.build_id !== documentBuild) {
+      reloadPage();
+      return;
+    }
+    if (update.reason === 'sync') {
+      lastRevision = update.revision;
+    } else {
+      if (update.revision <= lastRevision) return;
+      lastRevision = update.revision;
+    }
     latestUpdate = update;
     if (update.reason === 'channel.deleted') {
       update.channel_ids?.forEach(channelID => deletedChannels.add(channelID));
     }
     scheduleRefresh();
   });
+
+  const reloadPage = () => {
+    if (reloading) return;
+    reloading = true;
+    source.close();
+    window.location.reload();
+  };
 
   const scheduleRefresh = () => {
     pending = true;

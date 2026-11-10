@@ -20,8 +20,10 @@ type Renderer struct {
 
 type HomeData struct {
 	Version         string
+	BuildID         string
 	Page            string
 	Channels        []ChannelCard
+	Categories      []CategoryGroup
 	Videos          []VideoCard
 	CurrentChannel  *ChannelCard
 	MissedCount     int
@@ -31,10 +33,18 @@ type HomeData struct {
 
 type ChannelCard struct {
 	ID, Title, ImageURL     string
+	CategoryID              int64
 	ThumbnailURLs           []string
 	VideoCount, UnseenCount int
 	IncludeLong             bool
 	IncludeShorts           bool
+}
+
+type CategoryGroup struct {
+	ID        int64
+	Name      string
+	IsDefault bool
+	Channels  []ChannelCard
 }
 type VideoCard struct {
 	ID, ChannelID, ChannelTitle, Title, URL, ThumbnailURL string
@@ -64,11 +74,13 @@ func thumbnailJSON(values []string) string {
 
 func (r *Renderer) RenderHome(writer http.ResponseWriter, data HomeData) error {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	return r.templates.ExecuteTemplate(writer, "index.html", data)
 }
 
 func (r *Renderer) RenderContent(writer http.ResponseWriter, data HomeData) error {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-store")
 	if err := r.templates.ExecuteTemplate(writer, "content", data); err != nil {
 		return err
 	}

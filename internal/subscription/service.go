@@ -47,6 +47,7 @@ type RefreshReport struct {
 type ContentPreferences struct {
 	IncludeLong   bool
 	IncludeShorts bool
+	CategoryID    int64
 }
 
 func New(database *store.Store, channelResolver resolver, client feedClient, publishers ...publisher) *Service {
@@ -80,6 +81,10 @@ func (s *Service) Add(ctx context.Context, input string, preferences ContentPref
 	if !errors.Is(err, store.ErrChannelNotFound) {
 		return store.Channel{}, err
 	}
+	preferences.CategoryID, err = s.categoryID(ctx, preferences.CategoryID)
+	if err != nil {
+		return store.Channel{}, err
+	}
 	result, err := s.feeds.Fetch(ctx, channelID, youtube.FetchOptions{})
 	if err != nil {
 		return store.Channel{}, fmt.Errorf("fetch initial channel feed: %w", err)
@@ -106,7 +111,9 @@ func (s *Service) Refresh(ctx context.Context, channelID string) error {
 	if result.NotModified {
 		return s.store.RecordNotModified(ctx, channelID, keepValue(result.ETag, channel.FeedETag), keepValue(result.LastModified, channel.FeedLastModified))
 	}
-	preferences := ContentPreferences{IncludeLong: channel.IncludeLong, IncludeShorts: channel.IncludeShorts}
+	preferences := ContentPreferences{
+		IncludeLong: channel.IncludeLong, IncludeShorts: channel.IncludeShorts, CategoryID: channel.CategoryID,
+	}
 	if err := s.saveFeed(ctx, channel.SourceURL, channelID, preferences, result); err != nil {
 		return err
 	}
@@ -141,10 +148,12 @@ func (s *Service) UpdateSettings(ctx context.Context, channelID string, preferen
 	if err := validatePreferences(preferences); err != nil {
 		return err
 	}
-	if err := s.store.UpdateChannelSettings(ctx, channelID, preferences.IncludeLong, preferences.IncludeShorts); err != nil {
+	if err := s.store.UpdateChannelSettings(
+		ctx, channelID, preferences.CategoryID, preferences.IncludeLong, preferences.IncludeShorts,
+	); err != nil {
 		return err
 	}
-	s.publish("channel.settings_changed", channelID)
+	s.publish("channel.settings_changed", channelID, preferences.CategoryID)
 	_ = s.Refresh(ctx, channelID)
 	return nil
 }
@@ -179,6 +188,7 @@ func (s *Service) saveFeed(
 	sync := store.ChannelSync{
 		Channel: store.Channel{
 			YouTubeID:   result.Feed.ChannelID,
+			CategoryID:  preferences.CategoryID,
 			SourceURL:   sourceURL,
 			Title:       result.Feed.Title,
 			AvatarURL:   result.Feed.AvatarURL,
@@ -194,13 +204,23 @@ func (s *Service) saveFeed(
 	}
 	after, err := s.store.ChannelContentVersion(ctx, channelID)
 	if err != nil {
-		s.publish("channel.updated", channelID)
+		s.publish("channel.updated", channelID, preferences.CategoryID)
 		return nil
 	}
 	if before != after {
-		s.publish("channel.updated", channelID)
+		s.publish("channel.updated", channelID, preferences.CategoryID)
 	}
 	return nil
+}
+
+func (s *Service) categoryID(ctx context.Context, categoryID int64) (int64, error) {
+	if categoryID == 0 {
+		return store.DefaultCategoryID, nil
+	}
+	if _, err := s.store.Category(ctx, categoryID); err != nil {
+		return 0, err
+	}
+	return categoryID, nil
 }
 
 func (s *Service) contentVersion(ctx context.Context, channelID string) (string, error) {
@@ -211,11 +231,19 @@ func (s *Service) contentVersion(ctx context.Context, channelID string) (string,
 	return version, err
 }
 
-func (s *Service) publish(reason, channelID string) {
+func (s *Service) publish(reason, channelID string, categoryIDs ...int64) {
 	if s.updates == nil {
 		return
 	}
-	s.updates.Publish(events.Update{Reason: reason, Scopes: events.AllScopes(), ChannelIDs: []string{channelID}})
+	validCategoryIDs := make([]int64, 0, len(categoryIDs))
+	for _, categoryID := range categoryIDs {
+		if categoryID > 0 {
+			validCategoryIDs = append(validCategoryIDs, categoryID)
+		}
+	}
+	s.updates.Publish(events.Update{
+		Reason: reason, Scopes: events.AllScopes(), CategoryIDs: validCategoryIDs, ChannelIDs: []string{channelID},
+	})
 }
 
 func retentionCutoff() *time.Time {

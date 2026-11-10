@@ -11,12 +11,13 @@ func (s *Store) ChannelSummaries(ctx context.Context) ([]ChannelSummary, error) 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT c.youtube_id, c.source_url, c.title, c.avatar_url, c.feed_etag, c.feed_last_modified,
        c.last_checked_at, c.last_successful_sync_at, c.next_check_at, c.failure_count,
-       c.last_error, c.include_long, c.include_shorts, c.created_at, c.updated_at, COUNT(v.youtube_id),
+       c.last_error, c.include_long, c.include_shorts, c.category_id, c.position,
+       c.created_at, c.updated_at, COUNT(v.youtube_id),
        COALESCE(SUM(v.unseen), 0), COALESCE(NULLIF(c.avatar_url, ''), (
            SELECT thumbnail_url FROM videos latest WHERE latest.channel_youtube_id = c.youtube_id
            ORDER BY published_at DESC LIMIT 1), '')
 FROM channels c LEFT JOIN videos v ON v.channel_youtube_id = c.youtube_id
-GROUP BY c.youtube_id ORDER BY c.position ASC`)
+GROUP BY c.youtube_id ORDER BY c.category_id ASC, c.position ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list channel summaries: %w", err)
 	}
@@ -28,7 +29,7 @@ GROUP BY c.youtube_id ORDER BY c.position ASC`)
 		if err := rows.Scan(&summary.YouTubeID, &summary.SourceURL, &summary.Title, &summary.AvatarURL,
 			&summary.FeedETag, &summary.FeedLastModified, &lastChecked, &lastSuccessful, &nextCheck,
 			&summary.FailureCount, &summary.LastError, &summary.IncludeLong, &summary.IncludeShorts,
-			&created, &updated, &summary.VideoCount,
+			&summary.CategoryID, &summary.Position, &created, &updated, &summary.VideoCount,
 			&summary.UnseenCount, &summary.ImageURL); err != nil {
 			return nil, fmt.Errorf("scan channel summary: %w", err)
 		}

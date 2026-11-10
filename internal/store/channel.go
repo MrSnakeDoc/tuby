@@ -8,6 +8,7 @@ import (
 )
 
 func (s *Store) SaveChannel(ctx context.Context, channel Channel) error {
+	channel = channelWithDefaultCategory(channel)
 	if !channel.IncludeLong && !channel.IncludeShorts {
 		channel.IncludeLong = true
 	}
@@ -16,8 +17,9 @@ func (s *Store) SaveChannel(ctx context.Context, channel Channel) error {
 	}
 	channel = channelWithTimestamps(channel, time.Now())
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO channels(youtube_id, source_url, title, avatar_url, include_long, include_shorts, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO channels(youtube_id, category_id, position, source_url, title, avatar_url,
+    include_long, include_shorts, created_at, updated_at)
+VALUES(?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM channels WHERE category_id = ?), ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(youtube_id) DO UPDATE SET
     source_url = excluded.source_url,
     title = excluded.title,
@@ -26,6 +28,8 @@ ON CONFLICT(youtube_id) DO UPDATE SET
 	include_shorts = excluded.include_shorts,
     updated_at = excluded.updated_at`,
 		channel.YouTubeID,
+		channel.CategoryID,
+		channel.CategoryID,
 		channel.SourceURL,
 		channel.Title,
 		channel.AvatarURL,
@@ -38,6 +42,13 @@ ON CONFLICT(youtube_id) DO UPDATE SET
 		return fmt.Errorf("save channel %q: %w", channel.YouTubeID, err)
 	}
 	return nil
+}
+
+func channelWithDefaultCategory(channel Channel) Channel {
+	if channel.CategoryID == 0 {
+		channel.CategoryID = DefaultCategoryID
+	}
+	return channel
 }
 
 func validateChannel(channel Channel) error {

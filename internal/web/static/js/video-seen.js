@@ -3,7 +3,10 @@
     const link = event.target.closest('.video-link, .video-title');
     const card = link?.closest('.video-card[data-unseen="true"]');
     if (!card) return;
-    fetch(`/api/videos/${card.dataset.videoId}/seen`, {method: 'POST', keepalive: true})
+    fetch(`/api/videos/${card.dataset.videoId}/seen`, {
+      method: 'POST', keepalive: true, headers: window.tubyBuildHeaders?.() ?? {},
+    })
+      .then(response => window.tubyReloadIfStale?.(response) ?? response)
       .then(response => { if (response.ok) markSeen(card); })
       .catch(() => {});
   });

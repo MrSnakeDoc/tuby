@@ -58,6 +58,76 @@ UPDATE channels SET position = rowid WHERE position = 0;`,
 ALTER TABLE channels ADD COLUMN include_shorts INTEGER NOT NULL DEFAULT 0 CHECK (include_shorts IN (0, 1));
 ALTER TABLE videos ADD COLUMN is_short INTEGER NOT NULL DEFAULT 0 CHECK (is_short IN (0, 1));`,
 	},
+	{
+		version: 4,
+		query: `CREATE TABLE categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 50 AND name = trim(name)),
+    name_key TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    position INTEGER NOT NULL CHECK (position > 0),
+    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1))
+);
+
+CREATE UNIQUE INDEX categories_one_default_idx ON categories(is_default) WHERE is_default = 1;
+
+INSERT INTO categories(id, name, name_key, position, is_default)
+VALUES(1, 'Uncategorized', 'uncategorized', 1, 1);
+
+ALTER TABLE channels ADD COLUMN category_id INTEGER NOT NULL DEFAULT 1;
+
+WITH ranked AS (
+    SELECT youtube_id, ROW_NUMBER() OVER (ORDER BY position, rowid) AS category_position
+    FROM channels
+)
+UPDATE channels
+SET position = (SELECT category_position FROM ranked WHERE ranked.youtube_id = channels.youtube_id);
+
+CREATE INDEX channels_category_position_idx ON channels(category_id, position);
+
+CREATE TRIGGER channels_category_insert
+BEFORE INSERT ON channels
+WHEN NOT EXISTS(SELECT 1 FROM categories WHERE id = NEW.category_id)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid channel category');
+END;
+
+CREATE TRIGGER channels_category_update
+BEFORE UPDATE OF category_id ON channels
+WHEN NOT EXISTS(SELECT 1 FROM categories WHERE id = NEW.category_id)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid channel category');
+END;
+
+CREATE TRIGGER categories_linked_delete
+BEFORE DELETE ON categories
+WHEN EXISTS(SELECT 1 FROM channels WHERE category_id = OLD.id)
+BEGIN
+    SELECT RAISE(ABORT, 'category still has channels');
+END;
+
+CREATE TRIGGER categories_default_delete
+BEFORE DELETE ON categories
+WHEN OLD.is_default = 1
+BEGIN
+    SELECT RAISE(ABORT, 'default category cannot be deleted');
+END;
+
+CREATE TRIGGER categories_default_identity
+BEFORE UPDATE OF is_default ON categories
+WHEN OLD.is_default = 1 AND NEW.is_default = 0
+BEGIN
+    SELECT RAISE(ABORT, 'default category cannot be replaced');
+END;`,
+	},
+	{
+		version: 5,
+		query: `CREATE TRIGGER categories_default_name
+BEFORE UPDATE OF name, name_key ON categories
+WHEN OLD.is_default = 1
+BEGIN
+    SELECT RAISE(ABORT, 'default category cannot be renamed');
+END;`,
+	},
 }
 
 func (s *Store) initialize() error {

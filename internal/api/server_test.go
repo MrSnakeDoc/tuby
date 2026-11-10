@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/config"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/web"
 )
@@ -51,6 +53,13 @@ func TestHomeRendersTubyPlaceholder(t *testing.T) {
 	if !strings.Contains(body, "Tuby") || strings.Contains(body, "MailClown") {
 		t.Fatalf("homepage body = %q", body)
 	}
+	if !strings.Contains(body, `<meta name="tuby-build" content="test-build">`) ||
+		!strings.Contains(body, `/static/js/live-updates.js?v=test-build`) {
+		t.Fatalf("homepage does not expose the current build")
+	}
+	if response.Header().Get("Cache-Control") != "no-cache, no-store, must-revalidate" {
+		t.Fatalf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+	}
 }
 
 func TestHomeKeepsZeroCountersHiddenAndTargetable(t *testing.T) {
@@ -70,10 +79,22 @@ func TestHTMXContentIncludesOutOfBandCounters(t *testing.T) {
 	server := newServer()
 	request := httptest.NewRequest(http.MethodGet, "/missed", http.NoBody)
 	request.Header.Set("HX-Request", "true")
+	request.Header.Set("X-Tuby-Build", "test-build")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if count := strings.Count(response.Body.String(), `hx-swap-oob="outerHTML"`); count != 2 {
 		t.Fatalf("out-of-band counter count = %d, want 2", count)
+	}
+}
+
+func TestStaleHTMXClientIsForcedToReload(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodPost, "/api/channels/fetch", http.NoBody)
+	request.Header.Set("HX-Request", "true")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("status = %d, headers = %v", response.Code, response.Header())
 	}
 }
 
@@ -119,6 +140,21 @@ func TestAllowedCIDRSMiddlewarePermitsMatchingAddress(t *testing.T) {
 	}
 }
 
+func TestStopClosesLiveUpdateHub(t *testing.T) {
+	updates := events.New("test-build")
+	subscriber, unsubscribe := updates.Subscribe()
+	defer unsubscribe()
+	dependencies := testDependencies()
+	dependencies.Updates = updates
+	server := api.New(&config.Config{ListenAddr: "127.0.0.1:0"}, testLogger(), dependencies)
+	if err := server.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, open := <-subscriber; open {
+		t.Fatal("live update subscriber remained connected after server stop")
+	}
+}
+
 func newServer() *api.Server {
 	return newServerWithAllowedCIDRS(nil)
 }
@@ -140,6 +176,7 @@ func testDependencies() deps.Deps {
 		Templates: templates,
 		StartTime: time.Now(),
 		Version:   "test",
+		BuildID:   "test-build",
 		Commit:    "test",
 		BuildDate: "test",
 		GoVersion: "test",

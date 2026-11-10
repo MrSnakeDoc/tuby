@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -34,6 +35,14 @@ type refreshFailure struct {
 	Error     string `json:"error"`
 }
 
+type settingsResponse struct {
+	ChannelID     string `json:"channel_id"`
+	Title         string `json:"title"`
+	CategoryID    int64  `json:"category_id"`
+	IncludeLong   bool   `json:"include_long"`
+	IncludeShorts bool   `json:"include_shorts"`
+}
+
 func newHandler(subscriptions deps.Subscriptions, updates *events.Hub, stores ...*store.Store) *handler {
 	var database *store.Store
 	if len(stores) > 0 {
@@ -43,7 +52,12 @@ func newHandler(subscriptions deps.Subscriptions, updates *events.Hub, stores ..
 }
 
 func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
-	_, err := h.subscriptions.Add(request.Context(), request.FormValue("url"), contentPreferences(request))
+	preferences, err := contentPreferences(request)
+	if err != nil {
+		respond.Error(writer, http.StatusBadRequest, "invalid category")
+		return
+	}
+	_, err = h.subscriptions.Add(request.Context(), request.FormValue("url"), preferences)
 	if err != nil {
 		respond.Error(writer, http.StatusBadRequest, "add channel failed")
 		return
@@ -54,10 +68,15 @@ func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *handler) updateSettings(writer http.ResponseWriter, request *http.Request) {
-	err := h.subscriptions.UpdateSettings(
+	preferences, err := contentPreferences(request)
+	if err != nil {
+		respond.Error(writer, http.StatusBadRequest, "invalid category")
+		return
+	}
+	err = h.subscriptions.UpdateSettings(
 		request.Context(),
 		chi.URLParam(request, "channelID"),
-		contentPreferences(request),
+		preferences,
 	)
 	if err != nil {
 		respond.Error(writer, http.StatusBadRequest, "update channel settings failed")
@@ -65,6 +84,22 @@ func (h *handler) updateSettings(writer http.ResponseWriter, request *http.Reque
 	}
 	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) settings(writer http.ResponseWriter, request *http.Request) {
+	if h.store == nil {
+		respond.Error(writer, http.StatusServiceUnavailable, "channel settings unavailable")
+		return
+	}
+	channel, err := h.store.Channel(request.Context(), chi.URLParam(request, "channelID"))
+	if err != nil {
+		respondChannelError(writer, err)
+		return
+	}
+	respond.JSON(writer, http.StatusOK, settingsResponse{
+		ChannelID: channel.YouTubeID, Title: channel.Title, CategoryID: channel.CategoryID,
+		IncludeLong: channel.IncludeLong, IncludeShorts: channel.IncludeShorts,
+	})
 }
 
 func (h *handler) saveOrder(writer http.ResponseWriter, request *http.Request) {
@@ -165,11 +200,27 @@ func triggerUpdate(writer http.ResponseWriter) {
 	writer.Header().Set("HX-Trigger", "tuby:update")
 }
 
-func contentPreferences(request *http.Request) subscription.ContentPreferences {
+func contentPreferences(request *http.Request) (subscription.ContentPreferences, error) {
+	categoryID, err := optionalCategoryID(request.FormValue("category_id"))
+	if err != nil {
+		return subscription.ContentPreferences{}, err
+	}
 	return subscription.ContentPreferences{
 		IncludeLong:   request.FormValue("include_long") != "",
 		IncludeShorts: request.FormValue("include_shorts") != "",
+		CategoryID:    categoryID,
+	}, nil
+}
+
+func optionalCategoryID(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
 	}
+	categoryID, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || categoryID <= 0 {
+		return 0, errors.New("invalid category ID")
+	}
+	return categoryID, nil
 }
 
 func respondChannelError(writer http.ResponseWriter, err error) {

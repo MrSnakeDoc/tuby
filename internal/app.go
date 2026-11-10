@@ -51,7 +51,8 @@ func New() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open data store: %w", err)
 	}
-	updates := events.New()
+	buildID := version.BuildID()
+	updates := events.New(buildID)
 	subscriptions := subscription.NewDefault(database, updates)
 	dependencies := deps.Deps{
 		Templates:     templates,
@@ -60,6 +61,7 @@ func New() (*App, error) {
 		Updates:       updates,
 		StartTime:     time.Now(),
 		Version:       version.Version,
+		BuildID:       buildID,
 		Commit:        version.Commit,
 		BuildDate:     version.BuildDate,
 		GoVersion:     runtime.Version(),
@@ -78,10 +80,12 @@ func (a *App) Run() error {
 func (a *App) RunContext(ctx context.Context) error {
 	a.logStartup()
 	schedulerContext, stopScheduler := context.WithCancel(ctx)
-	defer stopScheduler()
 	schedulerDone := make(chan struct{})
 	go func() { a.scheduler.Run(schedulerContext); close(schedulerDone) }()
-	defer func() { <-schedulerDone }()
+	defer func() {
+		stopScheduler()
+		<-schedulerDone
+	}()
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- a.server.Start()
