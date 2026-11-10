@@ -67,7 +67,10 @@ func (r *Renderer) RenderHome(writer http.ResponseWriter, data HomeData) error {
 
 func (r *Renderer) RenderContent(writer http.ResponseWriter, data HomeData) error {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-	return r.templates.ExecuteTemplate(writer, "content", data)
+	if err := r.templates.ExecuteTemplate(writer, "content", data); err != nil {
+		return err
+	}
+	return r.templates.ExecuteTemplate(writer, "dock-updates", data)
 }
 
 func (r *Renderer) Static() http.Handler {

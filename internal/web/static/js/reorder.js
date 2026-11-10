@@ -60,7 +60,10 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({channel_ids: channelIDs}),
       });
-      if (response.ok) setEditing(false);
+      if (response.ok) {
+        setEditing(false);
+        document.dispatchEvent(new Event('tuby:reorder-finished'));
+      }
     });
 
     grid.addEventListener('dragstart', event => {

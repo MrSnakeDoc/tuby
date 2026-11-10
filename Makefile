@@ -1,4 +1,4 @@
-.PHONY: start build all test lint vuln cov clean test-events test-traefik
+.PHONY: start build all test race lint vuln cov clean test-events test-traefik
 
 GO := go
 APP := ./cmd/tuby/
@@ -24,11 +24,15 @@ build:
 start:
 	@TUBY_PORT=$(TUBY_PORT) TUBY_LOG_LEVEL=$(TUBY_LOG_LEVEL) TUBY_ALLOWED_CIDRS=$(TUBY_ALLOWED_CIDRS) $(GO) run $(APP)
 
-all: vuln lint test
+all: vuln lint test race vet
 
 test:
 	@echo "🧪 Running tests..."
 	@GOCACHE=$(GO_CACHE) $(GO) test -count=1 ./...
+
+race:
+	@@echo "🧪 Running tests..."
+	@GOCACHE=$(GO_CACHE) $(GO) test -race -count=1 ./...
 
 vuln:
 	@echo "🔍 Running vulnerability scan..."

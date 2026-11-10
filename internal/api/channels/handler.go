@@ -9,6 +9,7 @@ import (
 
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/respond"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
 )
@@ -20,6 +21,7 @@ type orderRequest struct {
 type handler struct {
 	subscriptions deps.Subscriptions
 	store         *store.Store
+	updates       *events.Hub
 }
 
 type refreshResponse struct {
@@ -32,12 +34,12 @@ type refreshFailure struct {
 	Error     string `json:"error"`
 }
 
-func newHandler(subscriptions deps.Subscriptions, stores ...*store.Store) *handler {
+func newHandler(subscriptions deps.Subscriptions, updates *events.Hub, stores ...*store.Store) *handler {
 	var database *store.Store
 	if len(stores) > 0 {
 		database = stores[0]
 	}
-	return &handler{subscriptions: subscriptions, store: database}
+	return &handler{subscriptions: subscriptions, store: database, updates: updates}
 }
 
 func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
@@ -47,6 +49,7 @@ func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writer.Header().Set("HX-Redirect", "/")
+	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusCreated)
 }
 
@@ -60,6 +63,8 @@ func (h *handler) saveOrder(writer http.ResponseWriter, request *http.Request) {
 		respond.Error(writer, http.StatusBadRequest, "save channel order failed")
 		return
 	}
+	h.publish(events.Update{Reason: "channel.reordered", Scopes: events.AllScopes(), ChannelIDs: payload.ChannelIDs})
+	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusNoContent)
 }
 
@@ -68,6 +73,7 @@ func (h *handler) delete(writer http.ResponseWriter, request *http.Request) {
 		respondChannelError(writer, err)
 		return
 	}
+	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusNoContent)
 }
 
@@ -76,6 +82,7 @@ func (h *handler) fetch(writer http.ResponseWriter, request *http.Request) {
 		respondChannelError(writer, err)
 		return
 	}
+	triggerUpdate(writer)
 	respond.JSON(writer, http.StatusOK, refreshResponse{Refreshed: 1, Failed: []refreshFailure{}})
 }
 
@@ -84,6 +91,8 @@ func (h *handler) markChannelSeen(writer http.ResponseWriter, request *http.Requ
 		respond.Error(writer, http.StatusInternalServerError, "mark channel as seen failed")
 		return
 	}
+	h.publish(events.Update{Reason: "channel.seen", Scopes: events.AllScopes(), ChannelIDs: []string{chi.URLParam(request, "channelID")}})
+	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusNoContent)
 }
 
@@ -98,6 +107,7 @@ func (h *handler) fetchAll(writer http.ResponseWriter, request *http.Request) {
 	if len(response.Failed) > 0 {
 		status = http.StatusMultiStatus
 	}
+	triggerUpdate(writer)
 	respond.JSON(writer, status, response)
 }
 
@@ -110,19 +120,35 @@ func (h *handler) removeLater(writer http.ResponseWriter, request *http.Request)
 }
 
 func (h *handler) markSeen(writer http.ResponseWriter, request *http.Request) {
-	if err := h.store.MarkVideoWatched(request.Context(), chi.URLParam(request, "videoID")); err != nil {
+	videoID := chi.URLParam(request, "videoID")
+	if err := h.store.MarkVideoWatched(request.Context(), videoID); err != nil {
 		respond.Error(writer, http.StatusNotFound, "video not found")
 		return
 	}
+	h.publish(events.Update{Reason: "video.seen", Scopes: events.AllScopes(), VideoIDs: []string{videoID}})
+	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) setLater(writer http.ResponseWriter, request *http.Request, enabled bool) {
-	if err := h.store.SetVideoWatchLater(request.Context(), chi.URLParam(request, "videoID"), enabled); err != nil {
+	videoID := chi.URLParam(request, "videoID")
+	if err := h.store.SetVideoWatchLater(request.Context(), videoID, enabled); err != nil {
 		respond.Error(writer, http.StatusNotFound, "video not found")
 		return
 	}
+	h.publish(events.Update{Reason: "video.watch_later", Scopes: events.AllScopes(), VideoIDs: []string{videoID}})
+	triggerUpdate(writer)
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) publish(update events.Update) {
+	if h.updates != nil {
+		h.updates.Publish(update)
+	}
+}
+
+func triggerUpdate(writer http.ResponseWriter) {
+	writer.Header().Set("HX-Trigger", "tuby:update")
 }
 
 func respondChannelError(writer http.ResponseWriter, err error) {

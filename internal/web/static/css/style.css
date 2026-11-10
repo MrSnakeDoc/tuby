@@ -447,6 +447,7 @@ input:focus-visible {
 .dock-count[data-zero="true"] {
   display: none;
 }
+.dock-count[hidden] { display: none !important; }
 .empty-state {
   border: 1px dashed #34313e;
   border-radius: 20px;

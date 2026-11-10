@@ -53,6 +53,30 @@ func TestHomeRendersTubyPlaceholder(t *testing.T) {
 	}
 }
 
+func TestHomeKeepsZeroCountersHiddenAndTargetable(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, id := range []string{"missed-count", "watch-later-count"} {
+		if !strings.Contains(body, `id="`+id+`"`) || !strings.Contains(body, `id="`+id+`" class="dock-count" hidden`) {
+			t.Fatalf("counter %q is not present and hidden", id)
+		}
+	}
+}
+
+func TestHTMXContentIncludesOutOfBandCounters(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/missed", http.NoBody)
+	request.Header.Set("HX-Request", "true")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if count := strings.Count(response.Body.String(), `hx-swap-oob="outerHTML"`); count != 2 {
+		t.Fatalf("out-of-band counter count = %d, want 2", count)
+	}
+}
+
 func TestHealthzReturnsNoStoreJSON(t *testing.T) {
 	server := newServer()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)

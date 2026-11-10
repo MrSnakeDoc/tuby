@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/web"
@@ -20,6 +21,7 @@ type Deps struct {
 	Templates     *web.Renderer
 	Store         *store.Store
 	Subscriptions Subscriptions
+	Updates       *events.Hub
 	StartTime     time.Time
 	Version       string
 	Commit        string

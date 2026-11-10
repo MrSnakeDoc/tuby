@@ -7,7 +7,7 @@ import (
 )
 
 func Register(router chi.Router, dependencies deps.Deps) {
-	handler := newHandler(dependencies.Subscriptions, dependencies.Store)
+	handler := newHandler(dependencies.Subscriptions, dependencies.Updates, dependencies.Store)
 	router.Post("/api/channels", handler.add)
 	router.Post("/api/channels/order", handler.saveOrder)
 	router.Delete("/api/channels/{channelID}", handler.delete)

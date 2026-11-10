@@ -1,0 +1,4 @@
+{{define "dock-updates"}}
+<span id="missed-count" class="dock-count" hx-swap-oob="outerHTML" {{if not .MissedCount}}hidden{{end}}>{{.MissedCount}}</span>
+<span id="watch-later-count" class="dock-count" hx-swap-oob="outerHTML" {{if not .WatchLaterCount}}hidden{{end}}>{{.WatchLaterCount}}</span>
+{{end}}

@@ -19,6 +19,7 @@ Built with Go, server-rendered HTML, HTMX, and SQLite. No user accounts or exter
 - **Mark as watched:** Mark individual videos or all videos from a channel as watched.
 - **Arrange channels:** Enter edit mode, drag channels into your preferred order, and save it.
 - **Automatic synchronization:** Check for new uploads every 15 minutes, with per-channel scheduling and retry backoff.
+- **Live synchronization:** Propagate watched, bookmarked, channel, counter, and scheduler updates to every open browser through SSE.
 - **Manual refresh:** Refresh all subscriptions or one channel on demand.
 - **Changing channel artwork:** Channel cards rotate through video thumbnails every 15 minutes while the page is open.
 - **Persistent storage:** Channels, videos, watched status, bookmarks, and ordering are stored in SQLite.
@@ -70,6 +71,12 @@ Tuby does not provide user authentication.
 Keep it on a trusted network or protect it with an authenticated reverse proxy.
 
 IP filtering is available through `TUBY_ALLOWED_CIDRS`. The server checks the direct peer address rather than trusting forwarded proxy headers.
+
+### Reverse proxy and live updates
+
+Live browser synchronization uses a long-lived Server-Sent Events connection on `GET /api/events`.
+
+If Tuby runs behind a reverse proxy, disable response buffering for this route and allow long-lived connections. The endpoint sends a heartbeat every 25 seconds and includes `X-Accel-Buffering: no`, but proxy-level timeouts and buffering settings still take precedence.
 
 ## How it works
 

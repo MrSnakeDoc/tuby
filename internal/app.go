@@ -14,6 +14,7 @@ import (
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/config"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/scheduler"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
@@ -50,11 +51,13 @@ func New() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open data store: %w", err)
 	}
-	subscriptions := subscription.NewDefault(database)
+	updates := events.New()
+	subscriptions := subscription.NewDefault(database, updates)
 	dependencies := deps.Deps{
 		Templates:     templates,
 		Store:         database,
 		Subscriptions: subscriptions,
+		Updates:       updates,
 		StartTime:     time.Now(),
 		Version:       version.Version,
 		Commit:        version.Commit,

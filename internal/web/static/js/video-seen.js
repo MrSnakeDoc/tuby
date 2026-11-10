@@ -17,9 +17,10 @@
   }
 
   function updateMissedCount() {
-    const badge = document.querySelector('.dock-link[href="/missed"] .dock-count');
+    const badge = document.querySelector('#missed-count');
     if (!badge) return;
     const count = Number(badge.textContent) - 1;
-    if (count > 0) badge.textContent = String(count); else badge.remove();
+    badge.textContent = String(Math.max(0, count));
+    badge.hidden = count <= 0;
   }
 })();

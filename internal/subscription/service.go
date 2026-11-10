@@ -2,9 +2,11 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/youtube"
 )
@@ -27,7 +29,10 @@ type Service struct {
 	store    *store.Store
 	resolver resolver
 	feeds    feedClient
+	updates  publisher
 }
+
+type publisher interface{ Publish(events.Update) }
 
 type RefreshFailure struct {
 	ChannelID string
@@ -39,12 +44,16 @@ type RefreshReport struct {
 	Failures  []RefreshFailure
 }
 
-func New(database *store.Store, channelResolver resolver, client feedClient) *Service {
-	return &Service{store: database, resolver: channelResolver, feeds: client}
+func New(database *store.Store, channelResolver resolver, client feedClient, publishers ...publisher) *Service {
+	var updates publisher
+	if len(publishers) > 0 {
+		updates = publishers[0]
+	}
+	return &Service{store: database, resolver: channelResolver, feeds: client, updates: updates}
 }
 
-func NewDefault(database *store.Store) *Service {
-	return New(database, youtube.NewResolver(nil), youtube.NewFeedClient(nil))
+func NewDefault(database *store.Store, publishers ...publisher) *Service {
+	return New(database, youtube.NewResolver(nil), youtube.NewFeedClient(nil), publishers...)
 }
 
 func (s *Service) Add(ctx context.Context, input string) (store.Channel, error) {
@@ -105,7 +114,11 @@ func (s *Service) RefreshAll(ctx context.Context) (RefreshReport, error) {
 }
 
 func (s *Service) Delete(ctx context.Context, channelID string) error {
-	return s.store.DeleteChannel(ctx, channelID)
+	if err := s.store.DeleteChannel(ctx, channelID); err != nil {
+		return err
+	}
+	s.publish("channel.deleted", channelID)
+	return nil
 }
 
 func (s *Service) resolve(ctx context.Context, reference youtube.ChannelReference) (string, error) {
@@ -126,6 +139,10 @@ func (s *Service) saveFeed(ctx context.Context, sourceURL, channelID string, res
 	if result.Feed.ChannelID != channelID {
 		return fmt.Errorf("YouTube RSS feed resolved to another channel")
 	}
+	before, err := s.contentVersion(ctx, channelID)
+	if err != nil {
+		return err
+	}
 	sync := store.ChannelSync{
 		Channel: store.Channel{
 			YouTubeID: result.Feed.ChannelID,
@@ -141,7 +158,30 @@ func (s *Service) saveFeed(ctx context.Context, sourceURL, channelID string, res
 	if err := s.store.SaveSync(ctx, sync); err != nil {
 		return fmt.Errorf("save channel feed: %w", err)
 	}
+	after, err := s.store.ChannelContentVersion(ctx, channelID)
+	if err != nil {
+		s.publish("channel.updated", channelID)
+		return nil
+	}
+	if before != after {
+		s.publish("channel.updated", channelID)
+	}
 	return nil
+}
+
+func (s *Service) contentVersion(ctx context.Context, channelID string) (string, error) {
+	version, err := s.store.ChannelContentVersion(ctx, channelID)
+	if errors.Is(err, store.ErrChannelNotFound) {
+		return "", nil
+	}
+	return version, err
+}
+
+func (s *Service) publish(reason, channelID string) {
+	if s.updates == nil {
+		return
+	}
+	s.updates.Publish(events.Update{Reason: reason, Scopes: events.AllScopes(), ChannelIDs: []string{channelID}})
 }
 
 func retentionCutoff() *time.Time {
