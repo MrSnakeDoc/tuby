@@ -12,6 +12,7 @@ LINT_CACHE ?= $(HOME)/.cache/golangci-lint
 LDFLAGS := -X $(VERSION_PACKAGE).Version=$(VERSION) \
 	-X $(VERSION_PACKAGE).Commit=$(GIT_COMMIT) \
 	-X $(VERSION_PACKAGE).BuildDate=$(BUILD_DATE)
+TUBY_LOG_LEVEL=debug
 
 # RUNTIME VARIABLES
 TUBY_PORT ?= 8090
@@ -21,7 +22,7 @@ build:
 	@$(GO) build -ldflags "$(LDFLAGS)" -o bin/$(APP_NAME) $(APP)
 
 start:
-	@TUBY_PORT=$(TUBY_PORT) TUBY_ALLOWED_CIDRS=$(TUBY_ALLOWED_CIDRS) $(GO) run $(APP)
+	@TUBY_PORT=$(TUBY_PORT) TUBY_LOG_LEVEL=$(TUBY_LOG_LEVEL) TUBY_ALLOWED_CIDRS=$(TUBY_ALLOWED_CIDRS) $(GO) run $(APP)
 
 all: vuln lint test
 
