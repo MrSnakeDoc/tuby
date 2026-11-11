@@ -50,6 +50,12 @@ func TestHomeRendersCategoryGroupsAndEmptyCategories(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := database.SaveLibraryOrder(context.Background(), []store.CategoryOrder{
+		{CategoryID: category.ID, ChannelIDs: []string{"UC123"}},
+		{CategoryID: store.DefaultCategoryID, ChannelIDs: []string{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	renderer, err := web.New()
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +76,9 @@ func TestHomeRendersCategoryGroupsAndEmptyCategories(t *testing.T) {
 	}
 	if count := strings.Count(body, "data-category-rename"); count != 1 {
 		t.Fatalf("rename actions = %d, want only the non-default category", count)
+	}
+	if !strings.Contains(body, `<option value="1" selected>Uncategorized</option>`) {
+		t.Fatal("add-channel form does not select the default category when it is ordered last")
 	}
 	channelRequest := httptest.NewRequest(http.MethodGet, "/channels/UC123", http.NoBody)
 	channelResponse := httptest.NewRecorder()

@@ -65,7 +65,7 @@
         <label for="channel-category">Category</label>
         <div class="category-select-row" data-category-select-row>
           <select class="category-select" id="channel-category" name="category_id" data-category-select required>
-            {{range .Categories}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+            {{range .Categories}}<option value="{{.ID}}"{{if .IsDefault}} selected{{end}}>{{.Name}}</option>{{end}}
           </select>
           <button class="category-add-inline" type="button" data-inline-category-start title="Create a category">＋</button>
         </div>
