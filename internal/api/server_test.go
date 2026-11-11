@@ -56,7 +56,8 @@ func TestHomeRendersTubyPlaceholder(t *testing.T) {
 	if !strings.Contains(body, `<meta name="tuby-build" content="test-build">`) ||
 		!strings.Contains(body, `/static/js/live-updates.js?v=test-build`) ||
 		!strings.Contains(body, `/static/js/channel-thumbnails.js?v=test-build`) ||
-		!strings.Contains(body, `/static/js/video-duration.js?v=test-build`) {
+		!strings.Contains(body, `/static/js/video-duration.js?v=test-build`) ||
+		!strings.Contains(body, `/static/js/keyboard-shortcuts.js?v=test-build`) {
 		t.Fatalf("homepage does not expose the current build")
 	}
 	if strings.Contains(body, "setInterval(pick") {
@@ -97,6 +98,41 @@ func TestCategoryManagementExposesCollapseAllControl(t *testing.T) {
 	if !strings.Contains(body, "data-category-collapse") ||
 		!strings.Contains(body, "Collapse all categories") || !strings.Contains(body, "Expand all categories") {
 		t.Fatal("category management asset does not expose the collapse-all toggle")
+	}
+}
+
+func TestKeyboardShortcutAssetExposesConfiguredSequences(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/static/js/keyboard-shortcuts.js", http.NoBody)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	body := response.Body.String()
+	for _, sequence := range []string{"'gh'", "'gm'", "'gw'", "'ac'", "'ag'", "'ca'", "'ea'"} {
+		if !strings.Contains(body, sequence) {
+			t.Fatalf("keyboard shortcut asset does not contain %s", sequence)
+		}
+	}
+	if !strings.Contains(body, "event.key === '?'") {
+		t.Fatal("keyboard shortcut asset does not expose the help shortcut")
+	}
+}
+
+func TestHomeRendersKeyboardShortcutDialog(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{
+		`id="shortcuts-dialog"`, `aria-labelledby="shortcuts-title"`,
+		`Keyboard shortcuts`, `Search channels`, `Show shortcuts`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("shortcut dialog does not contain %q", expected)
+		}
 	}
 }
 

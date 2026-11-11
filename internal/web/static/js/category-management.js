@@ -57,9 +57,21 @@
     if (!list) return;
     const sections = [...list.querySelectorAll('.channel-category')];
     const collapse = sections.some(section => !section.classList.contains('is-collapsed'));
-    sections.forEach(section => setCollapsed(section, collapse, true));
+    setAllCategories(collapse, list, button);
+  };
+
+  const setAllCategories = (collapsed, list, button) => {
+    list.querySelectorAll('.channel-category').forEach(section => setCollapsed(section, collapsed, true));
     const build = document.querySelector('meta[name="tuby-build"]')?.content ?? '';
     updateCollapseButton(list, button, build);
+  };
+
+  window.tubySetAllCategories = collapsed => {
+    const list = document.querySelector('.category-list');
+    const button = document.querySelector('[data-category-collapse]');
+    if (!list || !button) return false;
+    setAllCategories(collapsed, list, button);
+    return true;
   };
 
   const mountCategoryOrderButtons = (list, build) => {

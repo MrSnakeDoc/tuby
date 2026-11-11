@@ -19,22 +19,10 @@
   };
 
   document.addEventListener('keydown', event => {
-    if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !isTyping(event.target)) {
-      const input = document.querySelector('#channel-search');
-      if (input) {
-        event.preventDefault();
-        input.focus();
-      }
-      return;
-    }
-
     if (event.key !== 'Escape' || event.target.id !== 'channel-search') return;
     event.target.value = '';
     window.tubyFilterChannels(event.target);
     event.target.blur();
   });
 
-  function isTyping(target) {
-    return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
-  }
 })();
