@@ -55,7 +55,8 @@ func TestHomeRendersTubyPlaceholder(t *testing.T) {
 	}
 	if !strings.Contains(body, `<meta name="tuby-build" content="test-build">`) ||
 		!strings.Contains(body, `/static/js/live-updates.js?v=test-build`) ||
-		!strings.Contains(body, `/static/js/channel-thumbnails.js?v=test-build`) {
+		!strings.Contains(body, `/static/js/channel-thumbnails.js?v=test-build`) ||
+		!strings.Contains(body, `/static/js/video-duration.js?v=test-build`) {
 		t.Fatalf("homepage does not expose the current build")
 	}
 	if strings.Contains(body, "setInterval(pick") {

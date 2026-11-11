@@ -3,10 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+var ErrVideoNotFound = errors.New("video not found")
 
 func (s *Store) SaveVideo(ctx context.Context, video Video) error {
 	if err := validateVideo(video); err != nil {
@@ -85,7 +88,7 @@ func requireVideo(result sql.Result, videoID string) error {
 		return fmt.Errorf("check video update: %w", err)
 	}
 	if count == 0 {
-		return fmt.Errorf("video not found: %s", videoID)
+		return fmt.Errorf("%w: %s", ErrVideoNotFound, videoID)
 	}
 	return nil
 }

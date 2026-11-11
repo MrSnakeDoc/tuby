@@ -133,6 +133,7 @@ func videoCards(videos []store.Video, channels []store.ChannelSummary) []web.Vid
 			ID: value.YouTubeID, ChannelID: value.ChannelYouTubeID, ChannelTitle: channel.Title,
 			Title: value.Title, URL: value.URL, ThumbnailURL: value.ThumbnailURL,
 			Published: value.PublishedAt, Unseen: value.Unseen, WatchLater: value.WatchLater,
+			DurationSeconds: value.DurationSeconds,
 		})
 	}
 	return result

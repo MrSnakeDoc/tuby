@@ -20,6 +20,7 @@ import (
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/version"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/videoduration"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/web"
 )
 
@@ -54,17 +55,19 @@ func New() (*App, error) {
 	buildID := version.BuildID()
 	updates := events.New(buildID)
 	subscriptions := subscription.NewDefaultWithLogger(database, log.Named("subscriptions"), updates)
+	videoDurations := videoduration.NewDefault(database, log.Named("video_duration"), updates)
 	dependencies := deps.Deps{
-		Templates:     templates,
-		Store:         database,
-		Subscriptions: subscriptions,
-		Updates:       updates,
-		StartTime:     time.Now(),
-		Version:       version.Version,
-		BuildID:       buildID,
-		Commit:        version.Commit,
-		BuildDate:     version.BuildDate,
-		GoVersion:     runtime.Version(),
+		Templates:      templates,
+		Store:          database,
+		Subscriptions:  subscriptions,
+		VideoDurations: videoDurations,
+		Updates:        updates,
+		StartTime:      time.Now(),
+		Version:        version.Version,
+		BuildID:        buildID,
+		Commit:         version.Commit,
+		BuildDate:      version.BuildDate,
+		GoVersion:      runtime.Version(),
 	}
 	return &App{
 		cfg: cfg, logger: log, server: api.New(cfg, log, dependencies), store: database,

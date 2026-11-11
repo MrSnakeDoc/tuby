@@ -128,6 +128,11 @@ BEGIN
     SELECT RAISE(ABORT, 'default category cannot be renamed');
 END;`,
 	},
+	{
+		version: 6,
+		query: `ALTER TABLE videos ADD COLUMN duration_seconds INTEGER
+    CHECK (duration_seconds IS NULL OR duration_seconds > 0);`,
+	},
 }
 
 func (s *Store) initialize() error {

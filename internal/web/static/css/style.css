@@ -463,6 +463,8 @@ select:focus-visible,
 }
 .video-card {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .video-media {
   position: relative;
@@ -492,7 +494,7 @@ select:focus-visible,
 }
 .bookmark-button {
   position: absolute;
-  right: 10px;
+  right: 52px;
   top: 10px;
   z-index: 2;
   width: 34px;
@@ -510,7 +512,7 @@ select:focus-visible,
 }
 .seen-button {
   position: absolute;
-  right: 52px;
+  right: 94px;
   top: 10px;
   z-index: 2;
   width: 34px;
@@ -548,6 +550,38 @@ select:focus-visible,
   width: 18px;
   height: 18px;
 }
+.duration-button {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ffffff25;
+  border-radius: 10px;
+  background: #101116d9;
+  backdrop-filter: blur(12px);
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+.duration-button img {
+  width: 18px;
+  height: 18px;
+}
+.duration-button:hover {
+  background: #d3c0ff;
+  border-color: #d3c0ff;
+}
+.duration-button.htmx-request img {
+  animation: duration-spin 0.8s linear infinite;
+}
+.duration-button.is-error {
+  border-color: #e77b8d;
+  background: #6b2733;
+}
 .new-pill {
   position: absolute;
   right: 10px;
@@ -576,6 +610,25 @@ select:focus-visible,
   font-size: 12px;
   color: #878995;
   line-height: 1.5;
+}
+.video-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+}
+.video-duration {
+  flex: 0 0 auto;
+  color: #aaa6b3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+@keyframes duration-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .video-meta span {
   padding: 0 5px;

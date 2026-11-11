@@ -9,6 +9,7 @@ import (
 	apievents "git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/healthz"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/home"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/videos"
 )
 
 func RegisterRoutes(router chi.Router, dependencies deps.Deps) {
@@ -17,4 +18,5 @@ func RegisterRoutes(router chi.Router, dependencies deps.Deps) {
 	Register(router, dependencies, apievents.Register)
 	Register(router, dependencies, home.Register)
 	Register(router, dependencies, healthz.Register)
+	Register(router, dependencies, videos.Register)
 }

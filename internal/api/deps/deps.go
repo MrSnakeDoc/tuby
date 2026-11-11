@@ -18,15 +18,20 @@ type Subscriptions interface {
 	UpdateSettings(context.Context, string, subscription.ContentPreferences) error
 }
 
+type VideoDurations interface {
+	Fetch(context.Context, string) error
+}
+
 type Deps struct {
-	Templates     *web.Renderer
-	Store         *store.Store
-	Subscriptions Subscriptions
-	Updates       *events.Hub
-	StartTime     time.Time
-	Version       string
-	BuildID       string
-	Commit        string
-	BuildDate     string
-	GoVersion     string
+	Templates      *web.Renderer
+	Store          *store.Store
+	Subscriptions  Subscriptions
+	VideoDurations VideoDurations
+	Updates        *events.Hub
+	StartTime      time.Time
+	Version        string
+	BuildID        string
+	Commit         string
+	BuildDate      string
+	GoVersion      string
 }

@@ -49,12 +49,14 @@ type CategoryGroup struct {
 type VideoCard struct {
 	ID, ChannelID, ChannelTitle, Title, URL, ThumbnailURL string
 	Published                                             time.Time
+	DurationSeconds                                       *int64
 	Unseen, WatchLater                                    bool
 }
 
 func New() (*Renderer, error) {
 	templates, err := template.New("index.html").Funcs(template.FuncMap{
 		"timeAgo": timeAgo, "thumbnailJSON": thumbnailJSON, "compactCount": compactCount,
+		"videoDuration": videoDuration,
 	}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
@@ -67,6 +69,19 @@ func New() (*Renderer, error) {
 		templates: templates,
 		static:    http.FileServer(http.FS(staticFiles)),
 	}, nil
+}
+
+func videoDuration(seconds *int64) string {
+	if seconds == nil || *seconds <= 0 {
+		return ""
+	}
+	hours := *seconds / 3600
+	minutes := (*seconds % 3600) / 60
+	remainder := *seconds % 60
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, remainder)
+	}
+	return fmt.Sprintf("%02d:%02d", minutes, remainder)
 }
 
 func compactCount(value int) string {

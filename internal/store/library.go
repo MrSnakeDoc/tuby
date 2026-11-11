@@ -121,7 +121,8 @@ func (s *Store) SetVideoWatchLater(ctx context.Context, videoID string, enabled 
 
 func (s *Store) videos(ctx context.Context, clause string, args ...any) ([]Video, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT youtube_id, channel_youtube_id, title, url, thumbnail_url,
-published_at, discovered_at, last_seen_at, unseen, watch_later, watched_at, is_short FROM videos `+clause+` ORDER BY published_at DESC`, args...)
+published_at, discovered_at, last_seen_at, unseen, watch_later, watched_at, is_short, duration_seconds
+FROM videos `+clause+` ORDER BY published_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list videos: %w", err)
 	}
@@ -141,8 +142,9 @@ func scanVideo(row interface{ Scan(...any) error }) (Video, error) {
 	var video Video
 	var published, discovered, seen string
 	var watched sql.NullString
+	var duration sql.NullInt64
 	if err := row.Scan(&video.YouTubeID, &video.ChannelYouTubeID, &video.Title, &video.URL, &video.ThumbnailURL,
-		&published, &discovered, &seen, &video.Unseen, &video.WatchLater, &watched, &video.IsShort); err != nil {
+		&published, &discovered, &seen, &video.Unseen, &video.WatchLater, &watched, &video.IsShort, &duration); err != nil {
 		return Video{}, fmt.Errorf("scan video: %w", err)
 	}
 	var err error
@@ -161,6 +163,9 @@ func scanVideo(row interface{ Scan(...any) error }) (Video, error) {
 			return Video{}, err
 		}
 		video.WatchedAt = &value
+	}
+	if duration.Valid {
+		video.DurationSeconds = &duration.Int64
 	}
 	return video, nil
 }

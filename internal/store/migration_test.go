@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -74,6 +75,29 @@ func TestDefaultCategoryNameMigrationProtectsExistingDatabase(t *testing.T) {
 	t.Cleanup(func() { closeStore(t, store) })
 	assertStatementFails(t, store,
 		`UPDATE categories SET name = 'General', name_key = 'general' WHERE id = ?`, DefaultCategoryID)
+}
+
+func TestVideoDurationMigrationLeavesExistingVideosUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tuby.sqlite")
+	database := openLegacyDatabase(t, path, 5)
+	_, err := database.Exec(`
+INSERT INTO channels(youtube_id, source_url, title, created_at, updated_at)
+VALUES('UC123', 'https://youtube.com/@example', 'Example', '2026-11-08T12:00:00Z', '2026-11-08T12:00:00Z');
+INSERT INTO videos(youtube_id, channel_youtube_id, title, url, published_at, discovered_at, last_seen_at)
+VALUES('video', 'UC123', 'Video', 'https://youtube.com/watch?v=video',
+       '2026-11-08T12:00:00Z', '2026-11-08T12:00:00Z', '2026-11-08T12:00:00Z');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store := openStore(t, path)
+	t.Cleanup(func() { closeStore(t, store) })
+	duration, err := store.VideoDuration(context.Background(), "video")
+	if err != nil || duration != nil {
+		t.Fatalf("duration = %v, error = %v", duration, err)
+	}
 }
 
 func openLegacyDatabase(t *testing.T, path string, lastVersion int) *sql.DB {

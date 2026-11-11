@@ -19,3 +19,17 @@ func TestCompactCountCapsThreeDigitValues(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoDurationFormatsMinutesAndHours(t *testing.T) {
+	minutes := int64(754)
+	hours := int64(4354)
+	if got := videoDuration(&minutes); got != "12:34" {
+		t.Fatalf("minutes = %q, want 12:34", got)
+	}
+	if got := videoDuration(&hours); got != "1:12:34" {
+		t.Fatalf("hours = %q, want 1:12:34", got)
+	}
+	if got := videoDuration(nil); got != "" {
+		t.Fatalf("unknown duration = %q", got)
+	}
+}

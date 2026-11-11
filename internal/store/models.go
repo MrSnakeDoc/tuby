@@ -41,6 +41,7 @@ type Video struct {
 	Unseen           bool
 	WatchLater       bool
 	WatchedAt        *time.Time
+	DurationSeconds  *int64
 	IsShort          bool
 }
 

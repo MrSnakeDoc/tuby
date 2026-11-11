@@ -171,10 +171,17 @@
               <button class="bookmark-button" {{if .WatchLater}}hx-delete{{else}}hx-post{{end}}="/api/videos/{{.ID}}/watch-later" hx-swap="none">
                 <img src="/static/img/bookmark.svg?v={{$.BuildID}}" alt="">
               </button>
+              <button class="duration-button" hx-post="/api/videos/{{.ID}}/duration" hx-swap="none"
+                hx-disabled-elt="this" title="Fetch video duration">
+                <img src="/static/img/timer.svg?v={{$.BuildID}}" alt="">
+              </button>
               {{if .Unseen}}<span class="new-pill">NEW</span>{{end}}
             </div>
             <a class="video-title" href="{{.URL}}" target="_blank">{{.Title}}</a>
-            <div class="video-meta">{{.ChannelTitle}} · {{timeAgo .Published}}</div>
+            <div class="video-footer">
+              <div class="video-meta">{{.ChannelTitle}} · {{timeAgo .Published}}</div>
+              {{if .DurationSeconds}}<time class="video-duration">{{videoDuration .DurationSeconds}}</time>{{end}}
+            </div>
           </article>
         {{end}}
       </div>
