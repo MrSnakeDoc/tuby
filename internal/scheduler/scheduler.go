@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 )
 
@@ -20,16 +21,27 @@ type refresher interface {
 	Refresh(context.Context, string) error
 }
 
+type warningLogger interface {
+	Warn(string, ...logger.Field)
+}
+
 type Scheduler struct {
 	channels  channelSource
 	refresher refresher
 	interval  time.Duration
 	stagger   time.Duration
 	now       func() time.Time
+	logger    warningLogger
 }
 
-func New(channels channelSource, refresher refresher) *Scheduler {
-	return &Scheduler{channels: channels, refresher: refresher, interval: Interval, stagger: stagger, now: time.Now}
+func New(channels channelSource, refresher refresher, logs ...warningLogger) *Scheduler {
+	var log warningLogger
+	if len(logs) > 0 {
+		log = logs[0]
+	}
+	return &Scheduler{
+		channels: channels, refresher: refresher, interval: Interval, stagger: stagger, now: time.Now, logger: log,
+	}
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
@@ -49,6 +61,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 func (s *Scheduler) refreshDue(ctx context.Context) {
 	channels, err := s.channels.Channels(ctx)
 	if err != nil {
+		s.warn(ctx, "Scheduler channel listing failed", logger.Error(err))
 		return
 	}
 	for _, channel := range channels {
@@ -58,10 +71,19 @@ func (s *Scheduler) refreshDue(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = s.refresher.Refresh(ctx, channel.YouTubeID)
+		if err := s.refresher.Refresh(ctx, channel.YouTubeID); err != nil {
+			s.warn(ctx, "Scheduled channel refresh failed",
+				logger.String("channel_id", channel.YouTubeID), logger.Error(err))
+		}
 		if !wait(ctx, s.stagger) {
 			return
 		}
+	}
+}
+
+func (s *Scheduler) warn(ctx context.Context, message string, fields ...logger.Field) {
+	if s.logger != nil && ctx.Err() == nil {
+		s.logger.Warn(message, fields...)
 	}
 }
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/youtube"
 )
@@ -160,7 +162,10 @@ func TestUpdateSettingsPersistsAndPurgesDisabledVideosWhenRefreshFails(t *testin
 		t.Fatal(err)
 	}
 	updates := &testPublisher{}
-	service = New(database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")}, updates)
+	warnings := &testWarningLogger{}
+	service = NewWithLogger(
+		database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")}, warnings, updates,
+	)
 	updated := longOnly()
 	updated.CategoryID = category.ID
 	if err := service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", updated); err != nil {
@@ -181,10 +186,55 @@ func TestUpdateSettingsPersistsAndPurgesDisabledVideosWhenRefreshFails(t *testin
 	if len(updates.values) == 0 {
 		t.Fatal("settings update was not published")
 	}
+	assertRefreshWarning(t, warnings, channel.YouTubeID)
 	published := updates.values[0]
 	if published.Reason != "channel.settings_changed" || len(published.CategoryIDs) != 1 ||
 		published.CategoryIDs[0] != category.ID {
 		t.Fatalf("published update = %#v", published)
+	}
+}
+
+func TestUpdateSettingsWaitsForConcurrentRefreshAndKeepsNewPreferences(t *testing.T) {
+	database := openTestStore(t)
+	ctx := context.Background()
+	initial := feedResult()
+	initial.Feed.Videos = append(initial.Feed.Videos, shortVideo())
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{
+		IncludeLong: true, IncludeShorts: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := newBlockingFeedClient(initial)
+	service = New(database, testResolver{}, client)
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- service.Refresh(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA") }()
+	<-client.started
+
+	settingsDone := make(chan error, 1)
+	go func() {
+		settingsDone <- service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{IncludeShorts: true})
+	}()
+	select {
+	case err := <-settingsDone:
+		close(client.release)
+		t.Fatalf("settings completed during the active refresh: %v", err)
+	case <-time.After(50 * time.Millisecond):
+		close(client.release)
+	}
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-settingsDone; err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(videos) != 1 || !videos[0].IsShort {
+		t.Fatalf("videos after concurrent settings update = %#v", videos)
 	}
 }
 
@@ -230,8 +280,35 @@ type testResolver struct{}
 
 type testPublisher struct{ values []events.Update }
 
+type testWarningLogger struct {
+	messages []string
+	fields   [][]logger.Field
+}
+
 func (p *testPublisher) Publish(update events.Update) {
 	p.values = append(p.values, update)
+}
+
+func (l *testWarningLogger) Warn(message string, fields ...logger.Field) {
+	l.messages = append(l.messages, message)
+	l.fields = append(l.fields, fields)
+}
+
+func hasSubscriptionStringField(fields []logger.Field, key, value string) bool {
+	for _, field := range fields {
+		if field.Key == key && field.String == value {
+			return true
+		}
+	}
+	return false
+}
+
+func assertRefreshWarning(t *testing.T, warnings *testWarningLogger, channelID string) {
+	t.Helper()
+	if len(warnings.messages) != 1 || warnings.messages[0] != "Channel refresh after settings update failed" ||
+		!hasSubscriptionStringField(warnings.fields[0], "channel_id", channelID) {
+		t.Fatalf("warnings = %v, fields = %#v", warnings.messages, warnings.fields)
+	}
 }
 
 func (testResolver) ResolveChannelID(context.Context, string) (string, error) {
@@ -243,6 +320,34 @@ type testFeedClient struct {
 	err     error
 	options youtube.FetchOptions
 	calls   int
+}
+
+type blockingFeedClient struct {
+	result  youtube.FetchResult
+	started chan struct{}
+	release chan struct{}
+	mutex   sync.Mutex
+	calls   int
+}
+
+func newBlockingFeedClient(result youtube.FetchResult) *blockingFeedClient {
+	return &blockingFeedClient{result: result, started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (c *blockingFeedClient) Fetch(
+	_ context.Context,
+	_ string,
+	_ youtube.FetchOptions,
+) (youtube.FetchResult, error) {
+	c.mutex.Lock()
+	c.calls++
+	call := c.calls
+	c.mutex.Unlock()
+	if call == 1 {
+		close(c.started)
+		<-c.release
+	}
+	return c.result, nil
 }
 
 func (c *testFeedClient) Fetch(_ context.Context, _ string, options youtube.FetchOptions) (youtube.FetchResult, error) {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/youtube"
 )
@@ -30,9 +31,15 @@ type Service struct {
 	resolver resolver
 	feeds    feedClient
 	updates  publisher
+	logger   warningLogger
+	locks    channelLocks
 }
 
 type publisher interface{ Publish(events.Update) }
+
+type warningLogger interface {
+	Warn(string, ...logger.Field)
+}
 
 type RefreshFailure struct {
 	ChannelID string
@@ -51,15 +58,39 @@ type ContentPreferences struct {
 }
 
 func New(database *store.Store, channelResolver resolver, client feedClient, publishers ...publisher) *Service {
+	return newService(database, channelResolver, client, nil, publishers...)
+}
+
+func NewWithLogger(
+	database *store.Store,
+	channelResolver resolver,
+	client feedClient,
+	log warningLogger,
+	publishers ...publisher,
+) *Service {
+	return newService(database, channelResolver, client, log, publishers...)
+}
+
+func newService(
+	database *store.Store,
+	channelResolver resolver,
+	client feedClient,
+	log warningLogger,
+	publishers ...publisher,
+) *Service {
 	var updates publisher
 	if len(publishers) > 0 {
 		updates = publishers[0]
 	}
-	return &Service{store: database, resolver: channelResolver, feeds: client, updates: updates}
+	return &Service{store: database, resolver: channelResolver, feeds: client, updates: updates, logger: log}
 }
 
 func NewDefault(database *store.Store, publishers ...publisher) *Service {
 	return New(database, youtube.NewResolver(nil), youtube.NewFeedClient(nil), publishers...)
+}
+
+func NewDefaultWithLogger(database *store.Store, log warningLogger, publishers ...publisher) *Service {
+	return NewWithLogger(database, youtube.NewResolver(nil), youtube.NewFeedClient(nil), log, publishers...)
 }
 
 func (s *Service) Add(ctx context.Context, input string, preferences ContentPreferences) (store.Channel, error) {
@@ -99,6 +130,12 @@ func (s *Service) Add(ctx context.Context, input string, preferences ContentPref
 }
 
 func (s *Service) Refresh(ctx context.Context, channelID string) error {
+	unlock := s.lockChannel(channelID)
+	defer unlock()
+	return s.refresh(ctx, channelID)
+}
+
+func (s *Service) refresh(ctx context.Context, channelID string) error {
 	channel, err := s.store.Channel(ctx, channelID)
 	if err != nil {
 		return err
@@ -148,13 +185,19 @@ func (s *Service) UpdateSettings(ctx context.Context, channelID string, preferen
 	if err := validatePreferences(preferences); err != nil {
 		return err
 	}
+	unlock := s.lockChannel(channelID)
 	if err := s.store.UpdateChannelSettings(
 		ctx, channelID, preferences.CategoryID, preferences.IncludeLong, preferences.IncludeShorts,
 	); err != nil {
+		unlock()
 		return err
 	}
+	unlock()
 	s.publish("channel.settings_changed", channelID, preferences.CategoryID)
-	_ = s.Refresh(ctx, channelID)
+	if err := s.Refresh(ctx, channelID); err != nil && s.logger != nil && ctx.Err() == nil {
+		s.logger.Warn("Channel refresh after settings update failed",
+			logger.String("channel_id", channelID), logger.Error(err))
+	}
 	return nil
 }
 

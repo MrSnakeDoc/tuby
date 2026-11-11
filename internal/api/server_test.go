@@ -54,8 +54,12 @@ func TestHomeRendersTubyPlaceholder(t *testing.T) {
 		t.Fatalf("homepage body = %q", body)
 	}
 	if !strings.Contains(body, `<meta name="tuby-build" content="test-build">`) ||
-		!strings.Contains(body, `/static/js/live-updates.js?v=test-build`) {
+		!strings.Contains(body, `/static/js/live-updates.js?v=test-build`) ||
+		!strings.Contains(body, `/static/js/channel-thumbnails.js?v=test-build`) {
 		t.Fatalf("homepage does not expose the current build")
+	}
+	if strings.Contains(body, "setInterval(pick") {
+		t.Fatal("homepage still contains per-thumbnail timers")
 	}
 	if !strings.Contains(body, `/static/img/home.svg?v=test-build`) ||
 		!strings.Contains(body, `/static/img/clock-alert.svg?v=test-build`) ||

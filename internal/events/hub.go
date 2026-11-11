@@ -2,7 +2,6 @@ package events
 
 import (
 	"sync"
-	"sync/atomic"
 )
 
 const subscriberBuffer = 8
@@ -20,7 +19,7 @@ type Update struct {
 type Hub struct {
 	mu          sync.Mutex
 	subscribers map[chan Update]struct{}
-	revision    atomic.Uint64
+	revision    uint64
 	buildID     string
 	closed      bool
 }
@@ -30,13 +29,14 @@ func New(buildID string) *Hub {
 }
 
 func (h *Hub) Publish(update Update) {
-	update.Revision = h.revision.Add(1)
-	update.BuildID = h.buildID
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
 		return
 	}
+	h.revision++
+	update.Revision = h.revision
+	update.BuildID = h.buildID
 	for subscriber := range h.subscribers {
 		select {
 		case subscriber <- update:
@@ -84,7 +84,9 @@ func (h *Hub) Close() {
 }
 
 func (h *Hub) SyncUpdate() Update {
-	return Update{Revision: h.revision.Load(), BuildID: h.buildID, Reason: "sync", Scopes: AllScopes()}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return Update{Revision: h.revision, BuildID: h.buildID, Reason: "sync", Scopes: AllScopes()}
 }
 
 func AllScopes() []string {

@@ -1,6 +1,9 @@
 package events
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestHubBroadcastsUpdates(t *testing.T) {
 	hub := New("v2-test")
@@ -48,6 +51,30 @@ func TestHubCloseDisconnectsExistingAndFutureSubscribers(t *testing.T) {
 	defer unsubscribeFuture()
 	assertClosedSubscriber(t, future)
 	hub.Publish(Update{Reason: "ignored"})
+}
+
+func TestHubConcurrentPublishPreservesRevisionOrder(t *testing.T) {
+	const publishers = subscriberBuffer
+	hub := New("v2-test")
+	updates, unsubscribe := hub.Subscribe()
+	defer unsubscribe()
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	group.Add(publishers)
+	for index := 0; index < publishers; index++ {
+		go func() {
+			defer group.Done()
+			<-start
+			hub.Publish(Update{Reason: "concurrent"})
+		}()
+	}
+	close(start)
+	group.Wait()
+	for want := uint64(1); want <= publishers; want++ {
+		if update := <-updates; update.Revision != want {
+			t.Fatalf("revision = %d, want %d", update.Revision, want)
+		}
+	}
 }
 
 func assertClosedSubscriber(t *testing.T, subscriber <-chan Update) {

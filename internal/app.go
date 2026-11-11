@@ -53,7 +53,7 @@ func New() (*App, error) {
 	}
 	buildID := version.BuildID()
 	updates := events.New(buildID)
-	subscriptions := subscription.NewDefault(database, updates)
+	subscriptions := subscription.NewDefaultWithLogger(database, log.Named("subscriptions"), updates)
 	dependencies := deps.Deps{
 		Templates:     templates,
 		Store:         database,
@@ -66,7 +66,10 @@ func New() (*App, error) {
 		BuildDate:     version.BuildDate,
 		GoVersion:     runtime.Version(),
 	}
-	return &App{cfg: cfg, logger: log, server: api.New(cfg, log, dependencies), store: database, scheduler: scheduler.New(database, subscriptions)}, nil
+	return &App{
+		cfg: cfg, logger: log, server: api.New(cfg, log, dependencies), store: database,
+		scheduler: scheduler.New(database, subscriptions, log.Named("scheduler")),
+	}, nil
 }
 
 func (a *App) Run() error {
