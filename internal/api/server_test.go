@@ -85,6 +85,21 @@ func TestHomeKeepsZeroCountersHiddenAndTargetable(t *testing.T) {
 	}
 }
 
+func TestCategoryManagementExposesCollapseAllControl(t *testing.T) {
+	server := newServer()
+	request := httptest.NewRequest(http.MethodGet, "/static/js/category-management.js", http.NoBody)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "data-category-collapse") ||
+		!strings.Contains(body, "Collapse all categories") || !strings.Contains(body, "Expand all categories") {
+		t.Fatal("category management asset does not expose the collapse-all toggle")
+	}
+}
+
 func TestHTMXContentIncludesOutOfBandCounters(t *testing.T) {
 	server := newServer()
 	request := httptest.NewRequest(http.MethodGet, "/missed", http.NoBody)

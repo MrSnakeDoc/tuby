@@ -103,12 +103,15 @@ select:focus-visible,
 .top-actions [data-create-category-button] {
   order: 1;
 }
-.top-actions [data-reorder] {
+.top-actions [data-category-collapse] {
   order: 2;
 }
-.top-actions
-  > .icon-button:not([data-create-category-button]):not([data-reorder]) {
+.top-actions [data-reorder] {
   order: 3;
+}
+.top-actions
+  > .icon-button:not([data-create-category-button]):not([data-category-collapse]):not([data-reorder]) {
+  order: 4;
 }
 .top-caption,
 .eyebrow {

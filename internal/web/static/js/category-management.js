@@ -4,9 +4,9 @@
   const syncCategories = () => {
     const list = document.querySelector('.category-list');
     const actions = document.querySelector('.top-actions');
-    const existing = actions?.querySelector('[data-create-category-button]');
     if (!list || !actions) {
-      existing?.remove();
+      actions?.querySelector('[data-create-category-button]')?.remove();
+      actions?.querySelector('[data-category-collapse]')?.remove();
       return;
     }
     list.querySelectorAll('.channel-category').forEach(section => {
@@ -15,7 +15,24 @@
     syncCategoryOptions(list);
     const build = document.querySelector('meta[name="tuby-build"]')?.content ?? '';
     mountCategoryOrderButtons(list, build);
-    if (existing) return;
+    mountPageActions(list, actions, build);
+  };
+
+  const mountPageActions = (list, actions, build) => {
+    mountCreateCategoryButton(actions, build);
+    let collapse = actions.querySelector('[data-category-collapse]');
+    if (!collapse) {
+      collapse = document.createElement('button');
+      collapse.className = 'icon-button';
+      collapse.type = 'button';
+      collapse.dataset.categoryCollapse = '';
+      actions.append(collapse);
+    }
+    updateCollapseButton(list, collapse, build);
+  };
+
+  const mountCreateCategoryButton = (actions, build) => {
+    if (actions.querySelector('[data-create-category-button]')) return;
     const button = document.createElement('button');
     button.className = 'icon-button';
     button.type = 'button';
@@ -23,6 +40,26 @@
     button.title = 'Create a category';
     button.innerHTML = `<img src="/static/img/category.svg?v=${encodeURIComponent(build)}" alt="">`;
     actions.append(button);
+  };
+
+  const updateCollapseButton = (list, button, build) => {
+    const sections = [...list.querySelectorAll('.channel-category')];
+    const allCollapsed = sections.length > 0 && sections.every(section => section.classList.contains('is-collapsed'));
+    const title = allCollapsed ? 'Expand all categories' : 'Collapse all categories';
+    const icon = allCollapsed ? 'carret-down' : 'carret-right';
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.innerHTML = `<img src="/static/img/${icon}.svg?v=${encodeURIComponent(build)}" alt="">`;
+  };
+
+  const toggleAllCategories = button => {
+    const list = document.querySelector('.category-list');
+    if (!list) return;
+    const sections = [...list.querySelectorAll('.channel-category')];
+    const collapse = sections.some(section => !section.classList.contains('is-collapsed'));
+    sections.forEach(section => setCollapsed(section, collapse, true));
+    const build = document.querySelector('meta[name="tuby-build"]')?.content ?? '';
+    updateCollapseButton(list, button, build);
   };
 
   const mountCategoryOrderButtons = (list, build) => {
@@ -60,10 +97,18 @@
       document.querySelector('#category-dialog')?.showModal();
       return;
     }
+    const collapse = event.target.closest('[data-category-collapse]');
+    if (collapse) {
+      toggleAllCategories(collapse);
+      return;
+    }
     const toggle = event.target.closest('.category-toggle');
     if (toggle) {
       const section = toggle.closest('.channel-category');
       setCollapsed(section, !section.classList.contains('is-collapsed'), true);
+      const collapseButton = document.querySelector('[data-category-collapse]');
+      const build = document.querySelector('meta[name="tuby-build"]')?.content ?? '';
+      if (collapseButton) updateCollapseButton(section.closest('.category-list'), collapseButton, build);
       return;
     }
     const rename = event.target.closest('[data-category-rename]');
