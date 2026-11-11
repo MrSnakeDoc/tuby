@@ -122,7 +122,7 @@ The browser rotates these images every 15 minutes, independently of the backgrou
 
 ## Development
 
-Requires Go 1.27.3 as declared in `go.mod`.
+Requires Go 1.27.4 as declared in `go.mod`.
 
 ```sh
 go run ./cmd/tuby

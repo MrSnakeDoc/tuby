@@ -5,7 +5,7 @@ when:
 
 steps:
   - name: build-check
-    image: golang:1.27-alpine
+    image: golang:1.27.4-alpine
     commands:
       - echo "🔨 Checking if code compiles..."
       - apk add --no-cache git
@@ -13,7 +13,7 @@ steps:
       - echo "✅ Build check passed"
 
   - name: vulnerability-scan
-    image: golang:1.27-alpine
+    image: golang:1.27.4-alpine
     commands:
       - echo "🔒 Scanning for vulnerabilities..."
       - go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -28,7 +28,7 @@ steps:
       - echo "✅ Linting passed"
 
   - name: test
-    image: golang:1.27-alpine
+    image: golang:1.27.4-alpine
     commands:
       - echo "🧪 Running tests..."
       - go test -v ./...
