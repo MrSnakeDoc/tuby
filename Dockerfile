@@ -13,15 +13,16 @@ ARG TARGETOS=linux
 ARG TARGETARCH
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
-ARG BUILD_DATE=unknown
+ARG BUILD_DATE
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+RUN build_date="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -trimpath \
     -buildvcs=false \
     -ldflags="-s -w \
       -X git.nexacloud.dev/MrSnakeDoc/tuby/internal/version.Version=${VERSION} \
       -X git.nexacloud.dev/MrSnakeDoc/tuby/internal/version.Commit=${GIT_COMMIT} \
-      -X git.nexacloud.dev/MrSnakeDoc/tuby/internal/version.BuildDate=${BUILD_DATE}" \
+      -X git.nexacloud.dev/MrSnakeDoc/tuby/internal/version.BuildDate=${build_date}" \
     -o /out/tuby \
     ./cmd/tuby
 

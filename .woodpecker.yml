@@ -51,4 +51,3 @@ steps:
       build_args:
         VERSION: ${CI_COMMIT_TAG}
         GIT_COMMIT: ${CI_COMMIT_SHA}
-        BUILD_DATE: ${CI_PIPELINE_CREATED}
