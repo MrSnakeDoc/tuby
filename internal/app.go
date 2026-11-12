@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/config"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/logger"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/navire"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/notification"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/scheduler"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
@@ -32,6 +35,7 @@ type App struct {
 	server    *api.Server
 	store     *store.Store
 	scheduler *scheduler.Scheduler
+	notifier  *notification.Worker
 }
 
 func New() (*App, error) {
@@ -54,24 +58,43 @@ func New() (*App, error) {
 	}
 	buildID := version.BuildID()
 	updates := events.New(buildID)
-	subscriptions := subscription.NewDefaultWithLogger(database, log.Named("subscriptions"), updates)
+	subscriptions := subscription.NewDefaultWithNotifications(
+		database,
+		log.Named("subscriptions"),
+		subscription.NotificationConfig{Enabled: cfg.Navire.Enabled, Messages: cfg.Navire.Messages},
+		updates,
+	)
 	videoDurations := videoduration.NewDefault(database, log.Named("video_duration"), updates)
+	var notifier *notification.Worker
+	if cfg.Navire.Enabled {
+		notifier = notification.NewWorker(
+			database,
+			navire.NewClient(cfg.Navire.URL, cfg.Navire.RequestTimeout),
+			log.Named("notifications"),
+			notification.Config{
+				MaxAttempts: cfg.Navire.MaxAttempts,
+				InitialWait: cfg.Navire.RetryInitialWait,
+				MaxWait:     cfg.Navire.RetryMaxWait,
+			},
+		)
+	}
 	dependencies := deps.Deps{
-		Templates:      templates,
-		Store:          database,
-		Subscriptions:  subscriptions,
-		VideoDurations: videoDurations,
-		Updates:        updates,
-		StartTime:      time.Now(),
-		Version:        version.Version,
-		BuildID:        buildID,
-		Commit:         version.Commit,
-		BuildDate:      version.BuildDate,
-		GoVersion:      runtime.Version(),
+		Templates:            templates,
+		Store:                database,
+		Subscriptions:        subscriptions,
+		VideoDurations:       videoDurations,
+		Updates:              updates,
+		NotificationsEnabled: cfg.Navire.Enabled,
+		StartTime:            time.Now(),
+		Version:              version.Version,
+		BuildID:              buildID,
+		Commit:               version.Commit,
+		BuildDate:            version.BuildDate,
+		GoVersion:            runtime.Version(),
 	}
 	return &App{
 		cfg: cfg, logger: log, server: api.New(cfg, log, dependencies), store: database,
-		scheduler: scheduler.New(database, subscriptions, log.Named("scheduler")),
+		scheduler: scheduler.New(database, subscriptions, log.Named("scheduler")), notifier: notifier,
 	}, nil
 }
 
@@ -85,13 +108,8 @@ func (a *App) Run() error {
 
 func (a *App) RunContext(ctx context.Context) error {
 	a.logStartup()
-	schedulerContext, stopScheduler := context.WithCancel(ctx)
-	schedulerDone := make(chan struct{})
-	go func() { a.scheduler.Run(schedulerContext); close(schedulerDone) }()
-	defer func() {
-		stopScheduler()
-		<-schedulerDone
-	}()
+	stopBackground := a.startBackground(ctx)
+	defer stopBackground()
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- a.server.Start()
@@ -114,6 +132,27 @@ func (a *App) RunContext(ctx context.Context) error {
 	}
 }
 
+func (a *App) startBackground(ctx context.Context) func() {
+	backgroundContext, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		a.scheduler.Run(backgroundContext)
+	}()
+	if a.notifier != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			a.notifier.Run(backgroundContext)
+		}()
+	}
+	return func() {
+		cancel()
+		workers.Wait()
+	}
+}
+
 func (a *App) logStartup() {
 	a.logger.Info("Starting Tuby",
 		logger.String("addr", a.cfg.ListenAddr),
@@ -122,5 +161,6 @@ func (a *App) logStartup() {
 		logger.String("commit", version.Commit),
 		logger.String("build_date", version.BuildDate),
 		logger.String("go", runtime.Version()),
+		logger.Bool("navire_enabled", a.cfg.Navire.Enabled),
 	)
 }

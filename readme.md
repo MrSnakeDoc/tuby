@@ -1,135 +1,204 @@
 <h1>
-  <img src="./static/img/logo.svg" alt="Tuby logo" width="36" height="36">
+  <img src="./internal/web/static/img/favicon.svg" alt="" width="36" height="36">
   Tuby
 </h1>
 
 **Procrastination, now self-hosted.**
 
-Tuby is a lightweight, self-hosted YouTube subscription tracker. Follow channels without a Google account, find uploads you haven't opened, and save videos for later.
+Tuby is a lightweight, single-user YouTube subscription tracker. It follows public channel feeds without a Google account, keeps an independent Missed and Watch later library, and opens videos on YouTube when you decide to watch them.
 
-When you want to watch something, Tuby sends you to YouTube rather than playing it inside the app.
-
-Built with Go, server-rendered HTML, HTMX, and SQLite. No user accounts or external database required.
+The application is a single Go binary with embedded server-rendered HTML, HTMX, JavaScript and CSS. SQLite is the only database. There is no frontend build step and no external service is required unless optional [Navire notifications](#navire-notifications) are enabled.
 
 ## Features
 
-- **Your channels:** Add YouTube channels by URL and browse their recent uploads.
-- **Per-channel content:** Follow long videos, Shorts, or both; long videos remain the preferred source for channel artwork.
-- **Missed:** See videos you haven't marked as watched, with a count in the navigation.
-- **Watch later:** Bookmark videos to revisit, with its own navigation count.
-- **Mark as watched:** Mark individual videos or all videos from a channel as watched.
-- **Arrange channels:** Enter edit mode, drag channels into your preferred order, and save it.
-- **Automatic synchronization:** Check for new uploads every 15 minutes, with per-channel scheduling and retry backoff.
-- **Live synchronization:** Propagate watched, bookmarked, channel, counter, and scheduler updates to every open browser through SSE.
-- **Manual refresh:** Refresh all subscriptions or one channel on demand.
-- **Changing channel artwork:** Channel cards rotate through video thumbnails every 15 minutes while the page is open.
-- **Persistent storage:** Channels, videos, watched status, bookmarks, and ordering are stored in SQLite.
-- **Responsive dark UI:** A compact interface for desktop and mobile.
+- Add a channel from its YouTube URL or `UC…` identifier.
+- Follow long-form videos, Shorts, or both independently for each channel.
+- Refresh due feeds automatically every 15 minutes, or refresh globally/per channel on demand.
+- Track Missed, Watch later and watched states locally; opening an unseen video marks it watched immediately.
+- Organize channels into collapsible, ordered categories with drag-and-drop and keyboard controls.
+- Search channels instantly in the browser, without a server request.
+- Rotate channel artwork through recent long-form thumbnails, falling back to Shorts for Shorts-only channels.
+- Fetch a video's duration on demand without slowing down normal RSS synchronization.
+- Synchronize views, counters, preferences and content changes between open browsers with Server-Sent Events (SSE).
+- Reload stale browser clients automatically after a new Tuby build is deployed.
+- Optionally notify Navire when eligible videos are discovered, with a priority configured per channel.
+- Run as a non-root, multi-architecture container with persistent SQLite storage.
 
-## Quick start with Docker Compose
+## Quick start
+
+### Docker Compose
+
+The published image listens on port `8090` and runs as UID/GID `65532`.
 
 ```yaml
 services:
   tuby:
-    image: YOUR_TUBY_IMAGE:YOUR_TAG
+    image: git.nexacloud.dev/mrsnakedoc/tuby:latest
     ports:
-      - "8080:8080"
+      - "8090:8090"
+    environment:
+      TUBY_PORT: "8090"
+      TUBY_ALLOWED_CIDRS: "*"
     volumes:
-      - tuby-data:/app/data
+      - ./data:/app/data
     restart: unless-stopped
-
-volumes:
-  tuby-data:
 ```
 
-Replace `YOUR_TUBY_IMAGE:YOUR_TAG` with the image and tag published for your release, then run:
+Prepare the bind mount for the image's non-root user, start the service, then open <http://localhost:8090>:
 
 ```sh
+mkdir -p data
+sudo chown 65532:65532 data
 docker compose up -d
 ```
 
-Open http://localhost:8080.
+If Compose overrides the container user, make `./data` writable by that UID/GID instead. Never bake `tuby.sqlite` into the image.
 
-**Data permissions:** The provided Dockerfile uses `gcr.io/distroless/static-debian12:nonroot`, whose default user is UID 65532. The mounted volume must be writable by the container's effective user.
+### Local Go process
 
-If you override the runtime user (for example, to `1000:1000`), make sure the volume permissions match.
-
-## Configuration
-
-| Environment variable | Default | Description                                                         |
-| -------------------- | ------- | ------------------------------------------------------------------- |
-| `TUBY_PORT`          | `8080`  | HTTP listening port inside the container.                           |
-| `TUBY_ALLOWED_CIDRS` | `*`     | Comma-separated client IP addresses or CIDR ranges; `*` allows all. |
-| `TUBY_LOG_LEVEL`     | `info`  | `debug`, `info`, `warn`, or `error`.                                |
-| `TUBY_PRETTY_LOG`    | `true`  | Enable human-readable logs; set to `false` for non-pretty output.   |
-
-The SQLite database is stored at `data/tuby.sqlite` relative to the process working directory (`/app` in the Docker image).
-
-### Network security
-
-Tuby does not provide user authentication.
-
-Keep it on a trusted network or protect it with an authenticated reverse proxy.
-
-IP filtering is available through `TUBY_ALLOWED_CIDRS`. The server checks the direct peer address rather than trusting forwarded proxy headers.
-
-### Reverse proxy and live updates
-
-Live browser synchronization uses a long-lived Server-Sent Events connection on `GET /api/events`.
-
-If Tuby runs behind a reverse proxy, disable response buffering for this route and allow long-lived connections. The endpoint sends a heartbeat every 25 seconds and includes `X-Accel-Buffering: no`, but proxy-level timeouts and buffering settings still take precedence.
-
-## How it works
-
-Tuby resolves a channel reference, retrieves its public YouTube RSS feed, and stores the available video metadata locally.
-
-### Automatic synchronization
-
-Tuby includes a background scheduler that keeps subscriptions up to date.
-
-- **Startup:** Checks for channels that are due for synchronization.
-- **Every 15 minutes:** Checks again for channels requiring an update.
-- **Per-channel scheduling:** Uses the last successful synchronization and the next scheduled check to determine when a channel is due.
-- **Failure handling:** Applies exponential backoff after failed requests, starting at 15 minutes and capped at 6 hours.
-- **Request staggering:** Waits 2 seconds between scheduled channel refresh attempts.
-- **Graceful shutdown:** Stops the scheduler when the application shuts down.
-
-The scheduler only refreshes channels that are due. It does not blindly fetch every subscription on every tick.
-
-Manual refresh remains available from the interface, both globally and per channel.
-
-### Video tracking
-
-Tuby stores video metadata and tracks watched and bookmarked states locally.
-
-Opening a video takes you directly to YouTube. Videos can also be marked as watched without opening them.
-
-Watched and Watch later states are independent of your YouTube account.
-
-### Channel artwork
-
-Channel cards use thumbnails from their videos rather than static channel avatars.
-
-The browser rotates these images every 15 minutes, independently of the background RSS synchronization.
-
-## Limitations
-
-- YouTube RSS feeds expose only a limited selection of recent uploads. Tuby cannot recover a channel's complete video history from RSS alone.
-- Watched and Watch later states are local to Tuby and are not synchronized with your YouTube account.
-- There is no built-in user authentication or multi-user account system.
-- Videos older than the application's retention window (90 days) may be removed during feed synchronization.
-- Feed availability and metadata depend on YouTube's public endpoints.
-
-## Development
-
-Requires Go 1.27.4 as declared in `go.mod`.
+Tuby requires Go 1.27.4, matching [`go.mod`](./go.mod).
 
 ```sh
 go run ./cmd/tuby
-go test ./...
 ```
 
-For local execution, the application creates its SQLite database under `./data/`.
+Open <http://localhost:8090>. The database is created at `data/tuby.sqlite` relative to the process working directory.
+
+## Configuration
+
+All configuration is read from environment variables at startup.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TUBY_PORT` | `8090` | HTTP listening port. |
+| `TUBY_ALLOWED_CIDRS` | `*` | Comma-separated direct client IPs/CIDRs. `*` allows every peer. |
+| `TUBY_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
+| `TUBY_PRETTY_LOG` | `true` | Human-readable logs. Set to `false` for structured JSON logs. |
+| `TUBY_NAVIRE_ENABLED` | `false` | Expose notification controls and start the Navire delivery worker. |
+| `TUBY_NAVIRE_URL` | empty | Navire base URL. Required only when Navire is enabled. |
+| `TUBY_NAVIRE_REQUEST_TIMEOUT` | `5s` | Timeout for one Navire HTTP request. |
+| `TUBY_NAVIRE_MAX_ATTEMPTS` | `4` | Total delivery attempts before an event is permanently dropped. |
+| `TUBY_NAVIRE_RETRY_INITIAL_WAIT` | `2s` | Initial retry delay. |
+| `TUBY_NAVIRE_RETRY_MAX_WAIT` | `30s` | Maximum exponential-backoff delay. |
+| `TUBY_NOTIFICATION_MESSAGES` | empty | Optional JSON array of humorous messages. No message field is sent when absent, empty, or `[]`. |
+
+Durations use Go syntax such as `500ms`, `5s`, or `1m`. Retry counts and durations must be positive, and the initial retry wait cannot exceed the maximum wait.
+
+`TUBY_ALLOWED_CIDRS` checks the direct TCP peer. Tuby deliberately does not trust forwarded headers. If it is behind a reverse proxy, allow the proxy's address and enforce end-user authentication/network policy at the proxy.
+
+## Navire notifications
+
+Navire integration is optional and disabled by default. When enabled, every channel gains one of four notification levels:
+
+| Tuby level | Navire priority | Behavior |
+| --- | --- | --- |
+| `off` | — | No events; this is the default. |
+| `low` | `low` | Low-priority notification. |
+| `medium` | `normal` | Normal-priority notification. |
+| `critical` | `critical` | Critical-priority notification. |
+
+Enabling notifications is not retroactive. Only videos published after a channel's first notification activation and newly inserted by a later RSS synchronization are eligible. Long/Shorts preferences still apply, and the initial channel import never emits notifications.
+
+### 1. Install the Navire template
+
+Copy [`deploy/navire/templates/tuby_video.yml`](./deploy/navire/templates/tuby_video.yml) into the directory mounted as `NAVIRE_TEMPLATES_DIR` by Navire. Its `gotify.endpoints.prod` entry is a placeholder: rename it or adjust it to an enabled endpoint in your Navire configuration.
+
+The template contains the two variants Tuby can publish:
+
+- `new_video` when no optional message is configured;
+- `new_video_with_message` when a message was selected.
+
+### 2. Enable the integration
+
+```yaml
+services:
+  tuby:
+    environment:
+      TUBY_NAVIRE_ENABLED: "true"
+      TUBY_NAVIRE_URL: "https://navire.example.com"
+      TUBY_NAVIRE_REQUEST_TIMEOUT: "5s"
+      TUBY_NAVIRE_MAX_ATTEMPTS: "4"
+      TUBY_NAVIRE_RETRY_INITIAL_WAIT: "2s"
+      TUBY_NAVIRE_RETRY_MAX_WAIT: "30s"
+      TUBY_NOTIFICATION_MESSAGES: >-
+        ["First optional message.", "Another optional message."]
+```
+
+Tuby posts template key `tuby_video` to `POST /api/v1/events`. Discovery and delivery are separated by a transactional SQLite outbox: saving a new video and queuing its event happen in one transaction, while a background worker delivers it independently. Network errors and every non-2xx response are retried with bounded exponential backoff. After the configured attempt limit, the event is logged and permanently removed.
+
+Disabling Navire hides the selectors and stops the worker without deleting pending outbox entries. They are resumed if the integration is enabled again.
+
+## How synchronization works
+
+Tuby resolves a public channel reference, reads its YouTube RSS feed, and stores the available metadata locally. ETag and Last-Modified validators avoid unnecessary transfers when YouTube provides them.
+
+The scheduler runs once at startup and every 15 minutes. It refreshes only channels whose next check is due, waits two seconds between channels, prevents concurrent refreshes of the same channel, and records exponential backoff after feed failures. Manual global and per-channel refreshes use the same synchronization service.
+
+Feed synchronization retains watched/bookmarked state across updates. Videos absent from the current feed may be removed only after 90 days when they are neither unseen nor bookmarked. Disabling Long or Shorts removes videos of that type from the local library.
+
+YouTube RSS exposes only a recent window, not a channel's complete history. Tuby cannot recover videos no longer present in that feed.
+
+## Browser behavior
+
+Tuby uses HTMX for navigation and mutations. A long-lived `GET /api/events` SSE connection updates every open client after changes. The stream sends a heartbeat every 25 seconds; reverse proxies must allow long-lived responses and disable buffering for that route. Tuby also sends `X-Accel-Buffering: no`.
+
+Each HTML document and SSE payload carries a build identifier. If an old browser tab sees a different server build, it performs a full reload before applying an incompatible partial update.
+
+Channel search, category collapse state, drag-and-drop interactions and thumbnail rotation run locally in the browser. Category open/closed state is saved in `localStorage`.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `g` then `h` | Home |
+| `g` then `m` | Missed |
+| `g` then `w` | Watch later |
+| `a` then `c` | Add channel |
+| `a` then `g` | Add category on Home |
+| `c` then `a` | Collapse every category |
+| `e` then `a` | Expand every category |
+| `/` | Focus channel search |
+| `?` | Show the in-app shortcut reference |
+
+Two-key sequences expire after one second and are ignored while typing or while a dialog is open.
+
+## Data and operations
+
+- SQLite database: `data/tuby.sqlite`
+- SQLite mode: WAL, foreign keys enabled, five-second busy timeout
+- Health endpoint: `GET /healthz`
+- Live-update endpoint: `GET /api/events`
+- Graceful shutdown: `SIGINT` or `SIGTERM` stops HTTP, SSE, the scheduler and the notification worker
+
+Back up the database and its WAL files consistently, or stop Tuby before copying `data/`. Schema migrations run automatically and incrementally at startup; the application never recreates an existing database.
+
+Tuby has no authentication and is designed as one application instance with one shared library. Keep it on a trusted network or behind an authenticated reverse proxy.
+
+## Development and validation
+
+Common commands:
+
+```sh
+go run ./cmd/tuby
+go build ./...
+go test ./...
+go test -race ./...
+go vet ./...
+golangci-lint run --config .golangci.yml
+govulncheck ./...
+```
+
+The release pipeline in [`.woodpecker.yml`](./.woodpecker.yml) runs build, vulnerability, lint and test checks for `v*` tags, then publishes `linux/amd64` and `linux/arm64` images. Build metadata is injected through `VERSION`, `GIT_COMMIT`, and `BUILD_DATE` Docker build arguments and is exposed by `/healthz`.
+
+Tests create isolated temporary SQLite databases and do not modify `data/tuby.sqlite`.
+
+## Limitations
+
+- Tuby depends on YouTube's undocumented public channel pages and RSS feeds; their availability and markup can change without notice.
+- Watched and Watch later state is local to Tuby and is not synchronized with a YouTube account.
+- Video duration retrieval parses the public watch page on explicit request and can fail for unavailable videos, live streams, consent pages, or upstream markup changes.
+- There is no built-in authentication or multi-user separation.
+- Navire delivery is at-least-once across transient failures until its bounded retry limit; Navire owns downstream routing and any provider-specific deduplication.
 
 ---
 

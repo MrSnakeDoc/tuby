@@ -65,6 +65,7 @@
                       {{if .UnseenCount}}<span class="status-dot"></span>{{.UnseenCount}} new video{{if ne .UnseenCount 1}}s{{end}}{{else}}All caught up{{end}}
                     </div>
                   </a>
+                  {{if $.NotificationsEnabled}}{{template "notification-picker" .}}{{end}}
                   <button class="channel-delete" hx-delete="/api/channels/{{.ID}}"
                     hx-confirm="Remove {{.Title}} and all its videos?" hx-swap="none" title="Delete channel">
                     <img src="/static/img/trash.svg?v={{$.BuildID}}" alt="">
@@ -106,6 +107,7 @@
           <p class="page-description">Latest uploads, newest first.</p>
         </div>
         <div class="section-meta">
+          {{if .NotificationsEnabled}}{{template "notification-picker" .CurrentChannel}}{{end}}
           {{.CurrentChannel.VideoCount}} VIDEOS
           <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/fetch" hx-swap="none">↻</button>
           <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/seen"

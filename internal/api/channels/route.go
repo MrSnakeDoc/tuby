@@ -16,6 +16,9 @@ func Register(router chi.Router, dependencies deps.Deps) {
 	router.Post("/api/channels/{channelID}/seen", handler.markChannelSeen)
 	router.Get("/api/channels/{channelID}/settings", handler.settings)
 	router.Put("/api/channels/{channelID}/settings", handler.updateSettings)
+	if dependencies.NotificationsEnabled {
+		router.Put("/api/channels/{channelID}/notification", handler.updateNotification)
+	}
 	router.Post("/api/videos/{videoID}/watch-later", handler.saveLater)
 	router.Delete("/api/videos/{videoID}/watch-later", handler.removeLater)
 	router.Post("/api/videos/{videoID}/seen", handler.markSeen)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
@@ -65,6 +66,9 @@ func TestHomeRendersCategoryGroupsAndEmptyCategories(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.execute(response, request)
 	body := response.Body.String()
+	if strings.Contains(body, "data-notification-picker") || strings.Contains(body, "notification-settings.js") {
+		t.Fatal("notification controls are rendered while Navire is disabled")
+	}
 	for _, expected := range []string{
 		`class="category-list"`, `data-category-id="1"`, `data-category-id="2"`,
 		`Uncategorized`, `Tech`, `No channels in this category.`, `category-management.js?v=test-build`,
@@ -87,5 +91,59 @@ func TestHomeRendersCategoryGroupsAndEmptyCategories(t *testing.T) {
 	if !strings.Contains(channelBody, `<option value="2" selected>Tech</option>`) ||
 		!strings.Contains(channelBody, `id="settings-category"`) {
 		t.Fatalf("channel settings do not select the stored category")
+	}
+}
+
+func TestNotificationSelectorsRenderWhenNavireIsEnabled(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "tuby.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := database.SaveChannel(context.Background(), store.Channel{
+		YouTubeID: "UC123", SourceURL: "https://youtube.com/channel/UC123", Title: "Example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpdateChannelNotificationLevel(
+		context.Background(), "UC123", store.NotificationCritical, time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := web.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandler(deps.Deps{
+		Templates: renderer, Store: database, BuildID: "test-build", NotificationsEnabled: true,
+	})
+	homeResponse := httptest.NewRecorder()
+	handler.execute(homeResponse, httptest.NewRequest(http.MethodGet, "/", http.NoBody))
+	notificationBody := homeResponse.Body.String()
+	for _, expected := range []string{
+		`notification-settings.js?v=test-build`, `data-notification-picker`,
+		`data-notification-level="critical"`, `dog.svg?v=test-build`,
+		`Wake Me Up Before You Go-Go!`, `I Like to Move It!`, `Who Let the Dogs Out?!`,
+	} {
+		if !strings.Contains(notificationBody, expected) {
+			t.Fatalf("notification-enabled homepage does not contain %q", expected)
+		}
+	}
+	optionOrder := []string{`data-level="off"`, `data-level="low"`, `data-level="medium"`, `data-level="critical"`}
+	lastOption := -1
+	for _, option := range optionOrder {
+		position := strings.Index(notificationBody, option)
+		if position <= lastOption {
+			t.Fatalf("notification option %q is not in the expected order", option)
+		}
+		lastOption = position
+	}
+	channelResponse := httptest.NewRecorder()
+	handler.execute(channelResponse, httptest.NewRequest(http.MethodGet, "/channels/UC123", http.NoBody))
+	notificationChannelBody := channelResponse.Body.String()
+	pickerPosition := strings.Index(notificationChannelBody, "data-notification-picker")
+	countPosition := strings.Index(notificationChannelBody, "0 VIDEOS")
+	if pickerPosition < 0 || countPosition < 0 || pickerPosition > countPosition {
+		t.Fatal("channel notification selector is not rendered before the video count")
 	}
 }

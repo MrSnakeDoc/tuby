@@ -10,16 +10,18 @@ import (
 )
 
 type handler struct {
-	templates *web.Renderer
-	version   string
-	buildID   string
-	store     *store.Store
+	templates            *web.Renderer
+	version              string
+	buildID              string
+	store                *store.Store
+	notificationsEnabled bool
 }
 
 func newHandler(dependencies deps.Deps) *handler {
 	return &handler{
 		templates: dependencies.Templates, version: dependencies.Version,
 		buildID: dependencies.BuildID, store: dependencies.Store,
+		notificationsEnabled: dependencies.NotificationsEnabled,
 	}
 }
 
@@ -43,7 +45,7 @@ func (h *handler) execute(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *handler) pageData(request *http.Request) (web.HomeData, error) {
-	data := web.HomeData{Page: "home"}
+	data := web.HomeData{Page: "home", NotificationsEnabled: h.notificationsEnabled}
 	if h.store == nil {
 		return data, nil
 	}
@@ -51,7 +53,7 @@ func (h *handler) pageData(request *http.Request) (web.HomeData, error) {
 	if err != nil {
 		return data, err
 	}
-	data.Channels = channelCards(summaries)
+	data.Channels = channelCards(summaries, h.buildID)
 	categories, err := h.store.Categories(request.Context())
 	if err != nil {
 		return data, err
@@ -94,14 +96,15 @@ func (h *handler) pageData(request *http.Request) (web.HomeData, error) {
 	}
 }
 
-func channelCards(summaries []store.ChannelSummary) []web.ChannelCard {
+func channelCards(summaries []store.ChannelSummary, buildID string) []web.ChannelCard {
 	result := make([]web.ChannelCard, 0, len(summaries))
 	for _, value := range summaries {
 		result = append(result, web.ChannelCard{
-			ID: value.YouTubeID, Title: value.Title, ImageURL: value.ImageURL,
+			ID: value.YouTubeID, Title: value.Title, ImageURL: value.ImageURL, BuildID: buildID,
 			CategoryID:    value.CategoryID,
 			ThumbnailURLs: value.ThumbnailURLs, VideoCount: value.VideoCount, UnseenCount: value.UnseenCount,
 			IncludeLong: value.IncludeLong, IncludeShorts: value.IncludeShorts,
+			NotificationLevel: string(value.NotificationLevel),
 		})
 	}
 	return result
@@ -128,7 +131,7 @@ func categoryGroups(categories []store.Category, channels []web.ChannelCard) []w
 func videoCards(videos []store.Video, channels []store.ChannelSummary) []web.VideoCard {
 	result := make([]web.VideoCard, 0, len(videos))
 	for _, value := range videos {
-		channel, _ := findChannel(channelCards(channels), value.ChannelYouTubeID)
+		channel, _ := findChannel(channelCards(channels, ""), value.ChannelYouTubeID)
 		result = append(result, web.VideoCard{
 			ID: value.YouTubeID, ChannelID: value.ChannelYouTubeID, ChannelTitle: channel.Title,
 			Title: value.Title, URL: value.URL, ThumbnailURL: value.ThumbnailURL,

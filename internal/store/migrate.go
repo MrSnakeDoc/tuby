@@ -133,6 +133,31 @@ END;`,
 		query: `ALTER TABLE videos ADD COLUMN duration_seconds INTEGER
     CHECK (duration_seconds IS NULL OR duration_seconds > 0);`,
 	},
+	{
+		version: 7,
+		query: `ALTER TABLE channels ADD COLUMN notification_level TEXT NOT NULL DEFAULT 'off'
+    CHECK (notification_level IN ('off', 'low', 'medium', 'critical'));
+ALTER TABLE channels ADD COLUMN notification_enabled_at TEXT;`,
+	},
+	{
+		version: 8,
+		query: `CREATE TABLE notification_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_youtube_id TEXT NOT NULL UNIQUE,
+    channel_youtube_id TEXT NOT NULL,
+    channel_title TEXT NOT NULL,
+    video_title TEXT NOT NULL,
+    notification_level TEXT NOT NULL CHECK (notification_level IN ('low', 'medium', 'critical')),
+    variant TEXT NOT NULL CHECK (variant IN ('new_video', 'new_video_with_message')),
+    message TEXT NOT NULL DEFAULT '',
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    available_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX notification_outbox_available_idx
+ON notification_outbox(available_at, id);`,
+	},
 }
 
 func (s *Store) initialize() error {

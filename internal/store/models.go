@@ -3,23 +3,25 @@ package store
 import "time"
 
 type Channel struct {
-	YouTubeID          string
-	CategoryID         int64
-	Position           int
-	SourceURL          string
-	Title              string
-	AvatarURL          string
-	FeedETag           string
-	FeedLastModified   string
-	LastCheckedAt      *time.Time
-	LastSuccessfulSync *time.Time
-	NextCheckAt        *time.Time
-	FailureCount       int
-	LastError          string
-	IncludeLong        bool
-	IncludeShorts      bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	YouTubeID             string
+	CategoryID            int64
+	Position              int
+	SourceURL             string
+	Title                 string
+	AvatarURL             string
+	FeedETag              string
+	FeedLastModified      string
+	LastCheckedAt         *time.Time
+	LastSuccessfulSync    *time.Time
+	NextCheckAt           *time.Time
+	FailureCount          int
+	LastError             string
+	IncludeLong           bool
+	IncludeShorts         bool
+	NotificationLevel     NotificationLevel
+	NotificationEnabledAt *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 type Category struct {

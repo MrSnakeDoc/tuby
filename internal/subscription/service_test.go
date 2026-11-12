@@ -26,6 +26,113 @@ func TestAddSavesChannelAndInitialVideosAsUnseen(t *testing.T) {
 	}
 }
 
+func TestAddNeverEnqueuesNotificationsForInitialVideos(t *testing.T) {
+	database := openTestStore(t)
+	service := New(database, testResolver{}, &testFeedClient{result: feedResult()})
+	configureTestNotifications(service, []string{"Configured message"})
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	assertOutboxCount(t, database, 0)
+}
+
+func TestRefreshEnqueuesOnlyNewEligibleVideosAndFreezesNotification(t *testing.T) {
+	database := openTestStore(t)
+	initial := feedResult()
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	configureTestNotifications(service, []string{"Remember this exact message"})
+	ctx := context.Background()
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	activation := initial.Feed.Videos[0].Published.Add(12 * time.Hour)
+	if err := database.UpdateChannelNotificationLevel(
+		ctx, initial.Feed.ChannelID, store.NotificationMedium, activation,
+	); err != nil {
+		t.Fatal(err)
+	}
+	refresh := feedResult()
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("before-activation", "Before activation", activation.Add(-time.Minute)),
+		testLongVideo("new-video", "New eligible video", activation.Add(time.Minute)),
+		shortVideo(),
+	)
+	service = New(database, testResolver{}, &testFeedClient{result: refresh})
+	configureTestNotifications(service, []string{"Remember this exact message"})
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := requireSingleOutboxEntry(t, database)
+	if entry.VideoYouTubeID != "new-video" || entry.VideoTitle != "New eligible video" ||
+		entry.ChannelTitle != "Veritasium" || entry.Level != store.NotificationMedium ||
+		entry.Variant != store.NotificationVariantVideoWithMessage || entry.Message != "Remember this exact message" {
+		t.Fatalf("outbox entry = %#v", entry)
+	}
+	if err := database.UpdateChannelNotificationLevel(
+		ctx, refresh.Feed.ChannelID, store.NotificationCritical, activation.Add(time.Hour),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	entry = requireSingleOutboxEntry(t, database)
+	if entry.Level != store.NotificationMedium {
+		t.Fatalf("outbox after repeated refresh = %#v", entry)
+	}
+}
+
+func TestRefreshWithoutMessagesUsesMessageFreeVariant(t *testing.T) {
+	database := openTestStore(t)
+	initial := feedResult()
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	ctx := context.Background()
+	if _, err := service.Add(ctx, initial.Feed.ChannelID, longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	activation := initial.Feed.Videos[0].Published.Add(time.Hour)
+	if err := database.UpdateChannelNotificationLevel(ctx, initial.Feed.ChannelID, store.NotificationLow, activation); err != nil {
+		t.Fatal(err)
+	}
+	refresh := feedResult()
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("new-video", "New video", activation.Add(time.Minute)),
+	)
+	service = New(database, testResolver{}, &testFeedClient{result: refresh})
+	configureTestNotifications(service, nil)
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	entry := requireSingleOutboxEntry(t, database)
+	if entry.Variant != store.NotificationVariantVideo || entry.Message != "" {
+		t.Fatalf("outbox entry = %#v", entry)
+	}
+}
+
+func TestRefreshDoesNotEnqueueWhenNavireIsDisabled(t *testing.T) {
+	database := openTestStore(t)
+	initial := feedResult()
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	ctx := context.Background()
+	if _, err := service.Add(ctx, initial.Feed.ChannelID, longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	activation := initial.Feed.Videos[0].Published.Add(time.Hour)
+	if err := database.UpdateChannelNotificationLevel(ctx, initial.Feed.ChannelID, store.NotificationLow, activation); err != nil {
+		t.Fatal(err)
+	}
+	refresh := feedResult()
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("new-video", "New video", activation.Add(time.Minute)),
+	)
+	service = New(database, testResolver{}, &testFeedClient{result: refresh})
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	assertOutboxCount(t, database, 0)
+}
+
 func TestRefreshUsesValidatorsAndPreservesVideoStates(t *testing.T) {
 	database := openTestStore(t)
 	initial := &testFeedClient{result: feedResult()}
@@ -274,6 +381,47 @@ func openTestStore(t *testing.T) *store.Store {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	return database
+}
+
+func configureTestNotifications(service *Service, messages []string) {
+	service.notifications = NotificationConfig{Enabled: true, Messages: messages}
+	service.selectMessage = func(values []string) string {
+		if len(values) == 0 {
+			return ""
+		}
+		return values[0]
+	}
+}
+
+func assertOutboxCount(t *testing.T, database *store.Store, want int) {
+	t.Helper()
+	entries, err := database.PendingNotifications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != want {
+		t.Fatalf("outbox entries = %d, want %d", len(entries), want)
+	}
+}
+
+func requireSingleOutboxEntry(t *testing.T, database *store.Store) store.OutboxNotification {
+	t.Helper()
+	entries, err := database.PendingNotifications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("outbox entries = %#v, want one", entries)
+	}
+	return entries[0]
+}
+
+func testLongVideo(id, title string, published time.Time) youtube.Video {
+	return youtube.Video{
+		YouTubeID: id, ChannelID: "UCHnyfMqiRRG1u-2MsSQLbXA", Title: title,
+		URL: "https://www.youtube.com/watch?v=" + id, Thumbnail: "https://example.com/" + id + ".jpg",
+		Published: published,
+	}
 }
 
 type testResolver struct{}

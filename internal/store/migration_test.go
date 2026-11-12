@@ -100,6 +100,47 @@ VALUES('video', 'UC123', 'Video', 'https://youtube.com/watch?v=video',
 	}
 }
 
+func TestNotificationMigrationDefaultsExistingChannelsToOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tuby.sqlite")
+	database := openLegacyDatabase(t, path, 6)
+	_, err := database.Exec(`
+INSERT INTO channels(youtube_id, source_url, title, created_at, updated_at)
+VALUES('UC123', 'https://youtube.com/@example', 'Example',
+       '2026-11-08T12:00:00Z', '2026-11-08T12:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store := openStore(t, path)
+	t.Cleanup(func() { closeStore(t, store) })
+	channel, err := store.Channel(context.Background(), "UC123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.NotificationLevel != NotificationOff || channel.NotificationEnabledAt != nil {
+		t.Fatalf("notification = (%q, %v), want off and no activation", channel.NotificationLevel, channel.NotificationEnabledAt)
+	}
+}
+
+func TestNotificationOutboxMigrationStartsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tuby.sqlite")
+	database := openLegacyDatabase(t, path, 7)
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store := openStore(t, path)
+	t.Cleanup(func() { closeStore(t, store) })
+	entries, err := store.PendingNotifications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("migrated outbox entries = %d, want 0", len(entries))
+	}
+}
+
 func openLegacyDatabase(t *testing.T, path string, lastVersion int) *sql.DB {
 	t.Helper()
 	database, err := sql.Open("sqlite", path)

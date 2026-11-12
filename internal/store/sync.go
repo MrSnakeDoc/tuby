@@ -11,18 +11,20 @@ import (
 var ErrChannelNotFound = errors.New("channel not found")
 
 type ChannelSync struct {
-	Channel     Channel
-	Videos      []Video
-	ETag        string
-	Modified    string
-	PurgeBefore *time.Time
+	Channel            Channel
+	Videos             []Video
+	NotificationEvents map[string]NotificationEvent
+	ETag               string
+	Modified           string
+	PurgeBefore        *time.Time
 }
 
 func (s *Store) Channel(ctx context.Context, channelID string) (Channel, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT youtube_id, source_url, title, avatar_url, feed_etag, feed_last_modified,
        last_checked_at, last_successful_sync_at, next_check_at, failure_count,
-       last_error, include_long, include_shorts, category_id, position, created_at, updated_at
+       last_error, include_long, include_shorts, notification_level, notification_enabled_at,
+       category_id, position, created_at, updated_at
 FROM channels WHERE youtube_id = ?`, channelID)
 	channel, err := scanChannel(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -38,7 +40,8 @@ func (s *Store) Channels(ctx context.Context) ([]Channel, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT youtube_id, source_url, title, avatar_url, feed_etag, feed_last_modified,
        last_checked_at, last_successful_sync_at, next_check_at, failure_count,
-       last_error, include_long, include_shorts, category_id, position, created_at, updated_at
+       last_error, include_long, include_shorts, notification_level, notification_enabled_at,
+       category_id, position, created_at, updated_at
 FROM channels ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
@@ -75,6 +78,9 @@ func (s *Store) SaveSync(ctx context.Context, sync ChannelSync) error {
 		return err
 	}
 	if err := validateSyncVideos(sync.Videos, sync.Channel.YouTubeID); err != nil {
+		return err
+	}
+	if err := validateNotificationEvents(sync.NotificationEvents, sync.Videos, sync.Channel.YouTubeID); err != nil {
 		return err
 	}
 	transaction, err := s.db.BeginTx(ctx, nil)
@@ -139,8 +145,15 @@ ON CONFLICT(youtube_id) DO UPDATE SET source_url = excluded.source_url, title = 
 		return fmt.Errorf("save channel %q during sync: %w", channel.YouTubeID, err)
 	}
 	for _, video := range sync.Videos {
-		if err := saveSyncVideo(transaction, video, now); err != nil {
+		inserted, err := saveSyncVideo(transaction, video, now)
+		if err != nil {
 			return err
+		}
+		event, notify := sync.NotificationEvents[video.YouTubeID]
+		if inserted && notify {
+			if err := insertOutboxNotification(transaction, event, now); err != nil {
+				return err
+			}
 		}
 	}
 	if err := purgeDisabledVideos(transaction, channel); err != nil {
@@ -176,18 +189,50 @@ WHERE channel_youtube_id = ? AND last_seen_at < ? AND unseen = 0 AND watch_later
 	return nil
 }
 
-func saveSyncVideo(transaction *sql.Tx, video Video, now time.Time) error {
+func saveSyncVideo(transaction *sql.Tx, video Video, now time.Time) (bool, error) {
 	video = videoWithTimestamps(video, now)
-	_, err := transaction.Exec(`
+	result, err := transaction.Exec(`
 INSERT INTO videos(youtube_id, channel_youtube_id, title, url, thumbnail_url, published_at, discovered_at, last_seen_at, is_short)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(youtube_id) DO UPDATE SET title = excluded.title, url = excluded.url,
-    thumbnail_url = excluded.thumbnail_url, published_at = excluded.published_at,
-    last_seen_at = excluded.last_seen_at, is_short = excluded.is_short`,
+ON CONFLICT(youtube_id) DO NOTHING`,
 		video.YouTubeID, video.ChannelYouTubeID, video.Title, video.URL, video.ThumbnailURL,
 		formatTime(video.PublishedAt), formatTime(video.DiscoveredAt), formatTime(video.LastSeenAt), video.IsShort)
 	if err != nil {
-		return fmt.Errorf("save video %q during sync: %w", video.YouTubeID, err)
+		return false, fmt.Errorf("insert video %q during sync: %w", video.YouTubeID, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("check video %q insertion: %w", video.YouTubeID, err)
+	}
+	if rowsAffected == 1 {
+		return true, nil
+	}
+	_, err = transaction.Exec(`
+UPDATE videos SET title = ?, url = ?, thumbnail_url = ?, published_at = ?,
+    last_seen_at = ?, is_short = ? WHERE youtube_id = ?`,
+		video.Title, video.URL, video.ThumbnailURL, formatTime(video.PublishedAt),
+		formatTime(video.LastSeenAt), video.IsShort, video.YouTubeID)
+	if err != nil {
+		return false, fmt.Errorf("update video %q during sync: %w", video.YouTubeID, err)
+	}
+	return false, nil
+}
+
+func validateNotificationEvents(events map[string]NotificationEvent, videos []Video, channelID string) error {
+	videoIDs := make(map[string]struct{}, len(videos))
+	for _, video := range videos {
+		videoIDs[video.YouTubeID] = struct{}{}
+	}
+	for videoID, event := range events {
+		if videoID != event.VideoYouTubeID {
+			return fmt.Errorf("notification event key does not match video %q", event.VideoYouTubeID)
+		}
+		if _, exists := videoIDs[videoID]; !exists {
+			return fmt.Errorf("notification event references unknown video %q", videoID)
+		}
+		if err := validateNotificationEvent(event, channelID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -219,12 +264,12 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanChannel(row rowScanner) (Channel, error) {
 	var channel Channel
-	var lastChecked, lastSuccessful, nextCheck sql.NullString
+	var lastChecked, lastSuccessful, nextCheck, notificationEnabled sql.NullString
 	var created, updated string
 	err := row.Scan(&channel.YouTubeID, &channel.SourceURL, &channel.Title, &channel.AvatarURL,
 		&channel.FeedETag, &channel.FeedLastModified, &lastChecked, &lastSuccessful, &nextCheck,
 		&channel.FailureCount, &channel.LastError, &channel.IncludeLong, &channel.IncludeShorts,
-		&channel.CategoryID, &channel.Position, &created, &updated)
+		&channel.NotificationLevel, &notificationEnabled, &channel.CategoryID, &channel.Position, &created, &updated)
 	if err != nil {
 		return Channel{}, err
 	}
@@ -240,6 +285,10 @@ func scanChannel(row rowScanner) (Channel, error) {
 	channel.NextCheckAt, parseErr = parseOptionalTime(nextCheck)
 	if parseErr != nil {
 		return Channel{}, parseErr
+	}
+	channel.NotificationEnabledAt, parseErr = parseOptionalTime(notificationEnabled)
+	if parseErr != nil {
+		return Channel{}, fmt.Errorf("parse notification activation time: %w", parseErr)
 	}
 	channel.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
 	if parseErr != nil {

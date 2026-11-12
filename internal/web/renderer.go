@@ -19,25 +19,28 @@ type Renderer struct {
 }
 
 type HomeData struct {
-	Version         string
-	BuildID         string
-	Page            string
-	Channels        []ChannelCard
-	Categories      []CategoryGroup
-	Videos          []VideoCard
-	CurrentChannel  *ChannelCard
-	MissedCount     int
-	WatchLaterCount int
-	Now             time.Time
+	Version              string
+	BuildID              string
+	Page                 string
+	Channels             []ChannelCard
+	Categories           []CategoryGroup
+	Videos               []VideoCard
+	CurrentChannel       *ChannelCard
+	MissedCount          int
+	WatchLaterCount      int
+	NotificationsEnabled bool
+	Now                  time.Time
 }
 
 type ChannelCard struct {
 	ID, Title, ImageURL     string
+	BuildID                 string
 	CategoryID              int64
 	ThumbnailURLs           []string
 	VideoCount, UnseenCount int
 	IncludeLong             bool
 	IncludeShorts           bool
+	NotificationLevel       string
 }
 
 type CategoryGroup struct {
@@ -56,7 +59,8 @@ type VideoCard struct {
 func New() (*Renderer, error) {
 	templates, err := template.New("index.html").Funcs(template.FuncMap{
 		"timeAgo": timeAgo, "thumbnailJSON": thumbnailJSON, "compactCount": compactCount,
-		"videoDuration": videoDuration,
+		"videoDuration": videoDuration, "notificationIcon": notificationIcon,
+		"notificationLabel": notificationLabel,
 	}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
@@ -69,6 +73,32 @@ func New() (*Renderer, error) {
 		templates: templates,
 		static:    http.FileServer(http.FS(staticFiles)),
 	}, nil
+}
+
+func notificationIcon(level string) string {
+	switch level {
+	case "low":
+		return "bell-electric"
+	case "medium":
+		return "disc-3"
+	case "critical":
+		return "dog"
+	default:
+		return "cloud-hail"
+	}
+}
+
+func notificationLabel(level string) string {
+	switch level {
+	case "low":
+		return "Wake Me Up Before You Go-Go!"
+	case "medium":
+		return "I Like to Move It!"
+	case "critical":
+		return "Who Let the Dogs Out?!"
+	default:
+		return "Off"
+	}
 }
 
 func videoDuration(seconds *int64) string {

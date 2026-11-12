@@ -11,7 +11,8 @@ func (s *Store) ChannelSummaries(ctx context.Context) ([]ChannelSummary, error) 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT c.youtube_id, c.source_url, c.title, c.avatar_url, c.feed_etag, c.feed_last_modified,
        c.last_checked_at, c.last_successful_sync_at, c.next_check_at, c.failure_count,
-       c.last_error, c.include_long, c.include_shorts, c.category_id, c.position,
+       c.last_error, c.include_long, c.include_shorts, c.notification_level, c.notification_enabled_at,
+       c.category_id, c.position,
        c.created_at, c.updated_at, COUNT(v.youtube_id),
        COALESCE(SUM(v.unseen), 0), COALESCE(NULLIF(c.avatar_url, ''), (
            SELECT thumbnail_url FROM videos latest WHERE latest.channel_youtube_id = c.youtube_id
@@ -24,17 +25,22 @@ GROUP BY c.youtube_id ORDER BY c.category_id ASC, c.position ASC`)
 	result := make([]ChannelSummary, 0)
 	for rows.Next() {
 		var summary ChannelSummary
-		var lastChecked, lastSuccessful, nextCheck sql.NullString
+		var lastChecked, lastSuccessful, nextCheck, notificationEnabled sql.NullString
 		var created, updated string
 		if err := rows.Scan(&summary.YouTubeID, &summary.SourceURL, &summary.Title, &summary.AvatarURL,
 			&summary.FeedETag, &summary.FeedLastModified, &lastChecked, &lastSuccessful, &nextCheck,
 			&summary.FailureCount, &summary.LastError, &summary.IncludeLong, &summary.IncludeShorts,
-			&summary.CategoryID, &summary.Position, &created, &updated, &summary.VideoCount,
+			&summary.NotificationLevel, &notificationEnabled, &summary.CategoryID, &summary.Position,
+			&created, &updated, &summary.VideoCount,
 			&summary.UnseenCount, &summary.ImageURL); err != nil {
 			return nil, fmt.Errorf("scan channel summary: %w", err)
 		}
 		if err := setChannelTimes(&summary.Channel, lastChecked, lastSuccessful, nextCheck, created, updated); err != nil {
 			return nil, err
+		}
+		summary.NotificationEnabledAt, err = parseOptionalTime(notificationEnabled)
+		if err != nil {
+			return nil, fmt.Errorf("parse notification activation time: %w", err)
 		}
 		result = append(result, summary)
 	}

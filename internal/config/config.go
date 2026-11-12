@@ -18,14 +18,20 @@ type Config struct {
 	AllowedCIDRS []string
 	LogLevel     string
 	PrettyLog    bool
+	Navire       Navire
 }
 
 func Load() (*Config, error) {
+	navire, err := loadNavire()
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		ListenAddr:   ":" + valueOrDefault("TUBY_PORT", defaultPort),
 		AllowedCIDRS: allowedCIDRS(valueOrDefault("TUBY_ALLOWED_CIDRS", "*")),
 		LogLevel:     strings.ToLower(valueOrDefault("TUBY_LOG_LEVEL", defaultLogLevel)),
 		PrettyLog:    boolOrDefault("TUBY_PRETTY_LOG", true),
+		Navire:       navire,
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -40,7 +46,10 @@ func (c Config) Validate() error {
 	if err := validateAllowedCIDRS(c.AllowedCIDRS); err != nil {
 		return err
 	}
-	return validateLogLevel(c.LogLevel)
+	if err := validateLogLevel(c.LogLevel); err != nil {
+		return err
+	}
+	return c.Navire.Validate()
 }
 
 func valueOrDefault(name, fallback string) string {

@@ -33,3 +33,24 @@ func TestVideoDurationFormatsMinutesAndHours(t *testing.T) {
 		t.Fatalf("unknown duration = %q", got)
 	}
 }
+
+func TestNotificationPresentationUsesExpectedIconsAndLabels(t *testing.T) {
+	tests := []struct {
+		level string
+		icon  string
+		label string
+	}{
+		{level: "off", icon: "cloud-hail", label: "Off"},
+		{level: "low", icon: "bell-electric", label: "Wake Me Up Before You Go-Go!"},
+		{level: "medium", icon: "disc-3", label: "I Like to Move It!"},
+		{level: "critical", icon: "dog", label: "Who Let the Dogs Out?!"},
+	}
+	for _, test := range tests {
+		if icon := notificationIcon(test.level); icon != test.icon {
+			t.Fatalf("notificationIcon(%q) = %q, want %q", test.level, icon, test.icon)
+		}
+		if label := notificationLabel(test.level); label != test.label {
+			t.Fatalf("notificationLabel(%q) = %q, want %q", test.level, label, test.label)
+		}
+	}
+}

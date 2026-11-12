@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/bind"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/respond"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
@@ -41,6 +42,15 @@ type settingsResponse struct {
 	CategoryID    int64  `json:"category_id"`
 	IncludeLong   bool   `json:"include_long"`
 	IncludeShorts bool   `json:"include_shorts"`
+}
+
+type notificationRequest struct {
+	Level store.NotificationLevel `json:"level"`
+}
+
+type notificationResponse struct {
+	ChannelID string                  `json:"channel_id"`
+	Level     store.NotificationLevel `json:"level"`
 }
 
 func newHandler(subscriptions deps.Subscriptions, updates *events.Hub, stores ...*store.Store) *handler {
@@ -100,6 +110,28 @@ func (h *handler) settings(writer http.ResponseWriter, request *http.Request) {
 		ChannelID: channel.YouTubeID, Title: channel.Title, CategoryID: channel.CategoryID,
 		IncludeLong: channel.IncludeLong, IncludeShorts: channel.IncludeShorts,
 	})
+}
+
+func (h *handler) updateNotification(writer http.ResponseWriter, request *http.Request) {
+	if h.subscriptions == nil {
+		respond.Error(writer, http.StatusServiceUnavailable, "channel notifications unavailable")
+		return
+	}
+	var payload notificationRequest
+	if err := bind.JSON(writer, request, &payload); err != nil || !payload.Level.Valid() {
+		respond.Error(writer, http.StatusBadRequest, "invalid notification level")
+		return
+	}
+	channelID := chi.URLParam(request, "channelID")
+	if err := h.subscriptions.UpdateNotificationLevel(request.Context(), channelID, payload.Level); err != nil {
+		respondChannelNotificationError(writer, err)
+		return
+	}
+	h.publish(events.Update{
+		Reason: "channel.notification.updated", Scopes: events.AllScopes(), ChannelIDs: []string{channelID},
+	})
+	triggerUpdate(writer)
+	respond.JSON(writer, http.StatusOK, notificationResponse{ChannelID: channelID, Level: payload.Level})
 }
 
 func (h *handler) saveOrder(writer http.ResponseWriter, request *http.Request) {
@@ -229,6 +261,14 @@ func respondChannelError(writer http.ResponseWriter, err error) {
 		return
 	}
 	respond.Error(writer, http.StatusBadGateway, "channel operation failed")
+}
+
+func respondChannelNotificationError(writer http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrChannelNotFound) {
+		respond.Error(writer, http.StatusNotFound, "channel not found")
+		return
+	}
+	respond.Error(writer, http.StatusInternalServerError, "update channel notification failed")
 }
 
 func failures(values []subscription.RefreshFailure) []refreshFailure {

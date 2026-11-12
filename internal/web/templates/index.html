@@ -19,6 +19,7 @@
   <script src="/static/js/keyboard-shortcuts.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/reorder.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/content-settings.js?v={{.BuildID}}" defer></script>
+  {{if .NotificationsEnabled}}<script src="/static/js/notification-settings.js?v={{.BuildID}}" defer></script>{{end}}
   <script src="/static/js/dialogs.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/live-updates.js?v={{.BuildID}}" defer></script>
 </head>

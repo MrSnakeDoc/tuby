@@ -16,6 +16,7 @@ type Subscriptions interface {
 	Refresh(context.Context, string) error
 	RefreshAll(context.Context) (subscription.RefreshReport, error)
 	UpdateSettings(context.Context, string, subscription.ContentPreferences) error
+	UpdateNotificationLevel(context.Context, string, store.NotificationLevel) error
 }
 
 type VideoDurations interface {
@@ -23,15 +24,16 @@ type VideoDurations interface {
 }
 
 type Deps struct {
-	Templates      *web.Renderer
-	Store          *store.Store
-	Subscriptions  Subscriptions
-	VideoDurations VideoDurations
-	Updates        *events.Hub
-	StartTime      time.Time
-	Version        string
-	BuildID        string
-	Commit         string
-	BuildDate      string
-	GoVersion      string
+	Templates            *web.Renderer
+	Store                *store.Store
+	Subscriptions        Subscriptions
+	VideoDurations       VideoDurations
+	Updates              *events.Hub
+	NotificationsEnabled bool
+	StartTime            time.Time
+	Version              string
+	BuildID              string
+	Commit               string
+	BuildDate            string
+	GoVersion            string
 }

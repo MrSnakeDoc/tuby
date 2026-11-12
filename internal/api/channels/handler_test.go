@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/api/deps"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
 )
@@ -142,6 +144,96 @@ func TestGetSettingsReturnsCurrentChannelPreferences(t *testing.T) {
 	}
 }
 
+func TestUpdateNotificationPersistsLevelAndPublishesUpdate(t *testing.T) {
+	database := notificationTestStore(t)
+	hub := events.New("test-build")
+	updates, unsubscribe := hub.Subscribe()
+	t.Cleanup(unsubscribe)
+	router := chi.NewRouter()
+	Register(router, deps.Deps{
+		Subscriptions: &stubSubscriptions{notificationStore: database}, Store: database,
+		Updates: hub, NotificationsEnabled: true,
+	})
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/channels/UC123/notification",
+		strings.NewReader(`{"level":"medium"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	want := `{"channel_id":"UC123","level":"medium"}` + "\n"
+	if response.Body.String() != want {
+		t.Fatalf("body = %q, want %q", response.Body.String(), want)
+	}
+	channel, err := database.Channel(context.Background(), "UC123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.NotificationLevel != store.NotificationMedium || channel.NotificationEnabledAt == nil {
+		t.Fatalf("notification state = %q, %v", channel.NotificationLevel, channel.NotificationEnabledAt)
+	}
+	select {
+	case update := <-updates:
+		if update.Reason != "channel.notification.updated" || len(update.ChannelIDs) != 1 ||
+			update.ChannelIDs[0] != "UC123" {
+			t.Fatalf("update = %#v", update)
+		}
+	default:
+		t.Fatal("notification update was not published")
+	}
+}
+
+func TestUpdateNotificationRejectsInvalidLevel(t *testing.T) {
+	database := notificationTestStore(t)
+	router := chi.NewRouter()
+	Register(router, deps.Deps{
+		Subscriptions: &stubSubscriptions{}, Store: database, NotificationsEnabled: true,
+	})
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/channels/UC123/notification",
+		strings.NewReader(`{"level":"loud"}`),
+	)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestNotificationRouteIsAbsentWhenNavireIsDisabled(t *testing.T) {
+	router := newRouter(&stubSubscriptions{})
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/channels/UC123/notification",
+		strings.NewReader(`{"level":"low"}`),
+	)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func notificationTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	database, err := store.Open(filepath.Join(t.TempDir(), "tuby.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := database.SaveChannel(context.Background(), store.Channel{
+		YouTubeID: "UC123", SourceURL: "https://youtube.com/channel/UC123", Title: "Example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return database
+}
+
 func newRouter(service deps.Subscriptions) http.Handler {
 	router := chi.NewRouter()
 	Register(router, deps.Deps{Subscriptions: service})
@@ -149,14 +241,15 @@ func newRouter(service deps.Subscriptions) http.Handler {
 }
 
 type stubSubscriptions struct {
-	deleted    string
-	refreshed  string
-	deleteErr  error
-	refreshErr error
-	report     subscription.RefreshReport
-	reportErr  error
-	settings   subscription.ContentPreferences
-	added      subscription.ContentPreferences
+	deleted           string
+	refreshed         string
+	deleteErr         error
+	refreshErr        error
+	report            subscription.RefreshReport
+	reportErr         error
+	settings          subscription.ContentPreferences
+	added             subscription.ContentPreferences
+	notificationStore *store.Store
 }
 
 func (s *stubSubscriptions) Delete(_ context.Context, channelID string) error {
@@ -176,6 +269,17 @@ func (s *stubSubscriptions) Add(
 func (s *stubSubscriptions) UpdateSettings(_ context.Context, _ string, settings subscription.ContentPreferences) error {
 	s.settings = settings
 	return nil
+}
+
+func (s *stubSubscriptions) UpdateNotificationLevel(
+	ctx context.Context,
+	channelID string,
+	level store.NotificationLevel,
+) error {
+	if s.notificationStore == nil {
+		return nil
+	}
+	return s.notificationStore.UpdateChannelNotificationLevel(ctx, channelID, level, time.Now())
 }
 
 func (s *stubSubscriptions) Refresh(_ context.Context, channelID string) error {

@@ -27,12 +27,14 @@ type feedClient interface {
 }
 
 type Service struct {
-	store    *store.Store
-	resolver resolver
-	feeds    feedClient
-	updates  publisher
-	logger   warningLogger
-	locks    channelLocks
+	store         *store.Store
+	resolver      resolver
+	feeds         feedClient
+	updates       publisher
+	logger        warningLogger
+	notifications NotificationConfig
+	selectMessage func([]string) string
+	locks         channelLocks
 }
 
 type publisher interface{ Publish(events.Update) }
@@ -58,7 +60,7 @@ type ContentPreferences struct {
 }
 
 func New(database *store.Store, channelResolver resolver, client feedClient, publishers ...publisher) *Service {
-	return newService(database, channelResolver, client, nil, publishers...)
+	return newService(database, channelResolver, client, nil, NotificationConfig{}, publishers...)
 }
 
 func NewWithLogger(
@@ -68,7 +70,7 @@ func NewWithLogger(
 	log warningLogger,
 	publishers ...publisher,
 ) *Service {
-	return newService(database, channelResolver, client, log, publishers...)
+	return newService(database, channelResolver, client, log, NotificationConfig{}, publishers...)
 }
 
 func newService(
@@ -76,13 +78,17 @@ func newService(
 	channelResolver resolver,
 	client feedClient,
 	log warningLogger,
+	notifications NotificationConfig,
 	publishers ...publisher,
 ) *Service {
 	var updates publisher
 	if len(publishers) > 0 {
 		updates = publishers[0]
 	}
-	return &Service{store: database, resolver: channelResolver, feeds: client, updates: updates, logger: log}
+	return &Service{
+		store: database, resolver: channelResolver, feeds: client, updates: updates, logger: log,
+		notifications: copyNotificationConfig(notifications), selectMessage: randomNotificationMessage,
+	}
 }
 
 func NewDefault(database *store.Store, publishers ...publisher) *Service {
@@ -91,6 +97,17 @@ func NewDefault(database *store.Store, publishers ...publisher) *Service {
 
 func NewDefaultWithLogger(database *store.Store, log warningLogger, publishers ...publisher) *Service {
 	return NewWithLogger(database, youtube.NewResolver(nil), youtube.NewFeedClient(nil), log, publishers...)
+}
+
+func NewDefaultWithNotifications(
+	database *store.Store,
+	log warningLogger,
+	notifications NotificationConfig,
+	publishers ...publisher,
+) *Service {
+	return newService(
+		database, youtube.NewResolver(nil), youtube.NewFeedClient(nil), log, notifications, publishers...,
+	)
 }
 
 func (s *Service) Add(ctx context.Context, input string, preferences ContentPreferences) (store.Channel, error) {
@@ -123,7 +140,7 @@ func (s *Service) Add(ctx context.Context, input string, preferences ContentPref
 	if result.NotModified {
 		return store.Channel{}, fmt.Errorf("initial channel feed must contain content")
 	}
-	if err := s.saveFeed(ctx, reference.SourceURL, channelID, preferences, result); err != nil {
+	if err := s.saveFeed(ctx, reference.SourceURL, channelID, preferences, result, nil); err != nil {
 		return store.Channel{}, err
 	}
 	return s.store.Channel(ctx, channelID)
@@ -151,7 +168,7 @@ func (s *Service) refresh(ctx context.Context, channelID string) error {
 	preferences := ContentPreferences{
 		IncludeLong: channel.IncludeLong, IncludeShorts: channel.IncludeShorts, CategoryID: channel.CategoryID,
 	}
-	if err := s.saveFeed(ctx, channel.SourceURL, channelID, preferences, result); err != nil {
+	if err := s.saveFeed(ctx, channel.SourceURL, channelID, preferences, result, &channel); err != nil {
 		return err
 	}
 	return nil
@@ -201,6 +218,16 @@ func (s *Service) UpdateSettings(ctx context.Context, channelID string, preferen
 	return nil
 }
 
+func (s *Service) UpdateNotificationLevel(
+	ctx context.Context,
+	channelID string,
+	level store.NotificationLevel,
+) error {
+	unlock := s.lockChannel(channelID)
+	defer unlock()
+	return s.store.UpdateChannelNotificationLevel(ctx, channelID, level, time.Now())
+}
+
 func (s *Service) resolve(ctx context.Context, reference youtube.ChannelReference) (string, error) {
 	if reference.ID != "" {
 		return reference.ID, nil
@@ -217,6 +244,7 @@ func (s *Service) saveFeed(
 	sourceURL, channelID string,
 	preferences ContentPreferences,
 	result youtube.FetchResult,
+	notificationChannel *store.Channel,
 ) error {
 	if err := validFeed(result.Feed); err != nil {
 		return err
@@ -228,6 +256,7 @@ func (s *Service) saveFeed(
 	if err != nil {
 		return err
 	}
+	videos := storeVideos(result.Feed.Videos, preferences)
 	sync := store.ChannelSync{
 		Channel: store.Channel{
 			YouTubeID:   result.Feed.ChannelID,
@@ -237,10 +266,11 @@ func (s *Service) saveFeed(
 			AvatarURL:   result.Feed.AvatarURL,
 			IncludeLong: preferences.IncludeLong, IncludeShorts: preferences.IncludeShorts,
 		},
-		Videos:      storeVideos(result.Feed.Videos, preferences),
-		ETag:        result.ETag,
-		Modified:    result.LastModified,
-		PurgeBefore: retentionCutoff(),
+		Videos:             videos,
+		NotificationEvents: s.notificationEvents(notificationChannel, result.Feed.Title, videos),
+		ETag:               result.ETag,
+		Modified:           result.LastModified,
+		PurgeBefore:        retentionCutoff(),
 	}
 	if err := s.store.SaveSync(ctx, sync); err != nil {
 		return fmt.Errorf("save channel feed: %w", err)

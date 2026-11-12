@@ -170,6 +170,9 @@ select:focus-visible,
   line-height: 1.6;
 }
 .section-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   color: #878898;
   white-space: nowrap;
@@ -434,6 +437,121 @@ select:focus-visible,
 .channel-card-settings img {
   width: 17px;
   height: 17px;
+}
+.notification-picker {
+  position: absolute;
+  top: 11px;
+  right: 55px;
+  z-index: 5;
+}
+.notification-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #ffffff2b;
+  border-radius: 10px;
+  background: #0e0f15d9;
+  box-shadow: 0 5px 16px #0009;
+  color: #f5f3fa;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    transform 0.2s;
+}
+.notification-toggle:hover,
+.notification-toggle[aria-expanded="true"] {
+  border-color: #d3c0ff;
+  background: #30273eee;
+  transform: translateY(-1px);
+}
+.notification-toggle img {
+  width: 17px;
+  height: 17px;
+}
+.notification-menu {
+  position: fixed;
+  z-index: 1100;
+  width: min(310px, calc(100vw - 24px));
+  padding: 7px;
+  border: 1px solid #484858;
+  border-radius: 14px;
+  background: #15161d;
+  box-shadow: 0 18px 50px #000c;
+}
+.notification-menu[hidden] {
+  display: none;
+}
+.notification-menu button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #f5f3fa;
+  cursor: pointer;
+  text-align: left;
+}
+.notification-menu button:hover,
+.notification-menu button:focus-visible,
+.notification-menu button[aria-checked="true"] {
+  background: #51445e;
+}
+.notification-menu button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.notification-menu button img {
+  width: 19px;
+  height: 19px;
+}
+.notification-menu button span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.notification-menu strong {
+  overflow: hidden;
+  font: 700 12px/1.35 "Manrope", sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notification-menu small {
+  color: #9895a4;
+  font-size: 10px;
+}
+.notification-error {
+  display: block;
+  padding: 8px 11px 5px;
+  color: #ff9d9d;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.notification-error[hidden] {
+  display: none;
+}
+.section-meta .notification-picker {
+  position: relative;
+  top: auto;
+  right: auto;
+  flex: none;
+}
+.section-meta .notification-toggle {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.section-meta .notification-toggle img {
+  width: 16px;
+  height: 16px;
 }
 .inline-refresh {
   font-size: 18px;
@@ -1276,6 +1394,9 @@ select:focus-visible,
   display: none;
 }
 .is-reordering .channel-card-settings {
+  display: none;
+}
+.is-reordering .notification-picker {
   display: none;
 }
 .channel-category.is-dragging,
