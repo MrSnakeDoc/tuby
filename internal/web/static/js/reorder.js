@@ -1,4 +1,6 @@
 (() => {
+  const movementUnavailable = window.matchMedia('(max-width: 850px), (pointer: coarse)');
+
   const syncReorder = () => {
     const actions = document.querySelector('.top-actions');
     const list = document.querySelector('.category-list');
@@ -44,6 +46,7 @@
     setButtonIcon(button, build, false);
 
     button.addEventListener('click', () => {
+      if (movementUnavailable.matches && !state.editing) return;
       if (!state.editing) {
         enterEditMode(list, actions, button, build, state);
         return;
@@ -53,6 +56,7 @@
     list.addEventListener('click', event => {
       const trigger = event.target.closest('[data-category-channel-order]');
       if (!trigger) return;
+      if (movementUnavailable.matches && !state.editing) return;
       const section = trigger.closest('.channel-category');
       if (!state.editing) {
         enterCategoryEditMode(list, actions, section, trigger, build, state);

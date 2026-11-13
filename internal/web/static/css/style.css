@@ -1201,6 +1201,12 @@ select:focus-visible,
     height: 95px;
   }
 }
+@media (max-width: 850px), (pointer: coarse) {
+  body:not(.is-editing-order) [data-reorder],
+  .category-list:not(.is-reordering) [data-category-channel-order] {
+    display: none !important;
+  }
+}
 @media (max-width: 560px) {
   .feedback-toasts {
     right: 16px;
