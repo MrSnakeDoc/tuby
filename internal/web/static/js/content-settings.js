@@ -70,7 +70,7 @@
       if (load !== settingsLoad) return;
       window.tubyReloadIfStale?.(response);
       if (!response.ok) {
-        showCardError(form, 'Could not load these settings.');
+        showCardError(form, await fetchErrorMessage(response, 'Could not load these settings.'));
         return;
       }
       const settings = await response.json();
@@ -101,10 +101,11 @@
       });
       window.tubyReloadIfStale?.(response);
       if (!response.ok) {
-        showCardError(form, 'Could not save these settings.');
+        showCardError(form, await fetchErrorMessage(response, 'Could not save these settings.'));
         return;
       }
       form.closest('dialog').close();
+      window.tubyShowSuccess?.('Channel settings saved.');
       document.dispatchEvent(new Event('tuby:update'));
     } catch {
       showCardError(form, 'Could not save these settings.');
@@ -163,6 +164,9 @@
     error.textContent = message;
     error.hidden = message === '';
   };
+
+  const fetchErrorMessage = (response, fallback) => window.tubyFetchErrorMessage?.(response, fallback) ??
+    Promise.resolve(fallback);
 
   const channelName = card => card.querySelector('.channel-name')?.textContent?.trim() ?? 'channel';
 

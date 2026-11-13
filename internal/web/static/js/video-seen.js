@@ -7,8 +7,18 @@
       method: 'POST', keepalive: true, headers: window.tubyBuildHeaders?.() ?? {},
     })
       .then(response => window.tubyReloadIfStale?.(response) ?? response)
-      .then(response => { if (response.ok) markSeen(card); })
-      .catch(() => {});
+      .then(async response => {
+        if (response.ok) {
+          markSeen(card);
+          return;
+        }
+        const message = await (window.tubyFetchErrorMessage?.(
+          response,
+          'Tuby could not mark this video as watched.',
+        ) ?? Promise.resolve('Tuby could not mark this video as watched.'));
+        window.tubyShowError?.(message);
+      })
+      .catch(() => window.tubyShowError?.('Tuby could not reach the server. Your watched state was not saved.'));
   });
 
   function markSeen(card) {

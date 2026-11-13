@@ -359,8 +359,22 @@ func TestAddRejectsUnknownCategoryBeforeFetching(t *testing.T) {
 
 func TestContentPreferencesRequireOneVideoType(t *testing.T) {
 	service := New(openTestStore(t), testResolver{}, &testFeedClient{result: feedResult()})
-	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{}); err == nil {
-		t.Fatal("Add succeeded without a selected video type")
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{}); !errors.Is(err, ErrVideoTypesRequired) {
+		t.Fatalf("error = %v, want ErrVideoTypesRequired", err)
+	}
+}
+
+func TestAddClassifiesInvalidReferenceAndFeedFailure(t *testing.T) {
+	service := New(openTestStore(t), testResolver{}, &testFeedClient{result: feedResult()})
+	if _, err := service.Add(context.Background(), "not a channel", longOnly()); !errors.Is(err, ErrInvalidChannelReference) {
+		t.Fatalf("invalid reference error = %v", err)
+	}
+	fetchError := &youtube.FetchError{StatusCode: 404}
+	service = New(openTestStore(t), testResolver{}, &testFeedClient{err: fetchError})
+	_, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly())
+	var received *youtube.FetchError
+	if !errors.Is(err, ErrChannelFeedUnavailable) || !errors.As(err, &received) || received.StatusCode != 404 {
+		t.Fatalf("feed error = %v", err)
 	}
 }
 

@@ -186,6 +186,7 @@
       }
       addCategoryOptions(payload, field.querySelector('[data-category-select]'));
       resetInlineCreate(field);
+      window.tubyShowSuccess?.('Category created.');
       document.dispatchEvent(new Event('tuby:update'));
     } catch {
       showError(creator, 'Category operation failed.');
@@ -217,9 +218,11 @@
       if (form.matches('[data-category-create]')) {
         addCategoryOptions(payload, null);
         form.closest('dialog').close();
+        window.tubyShowSuccess?.('Category created.');
       } else {
         finishRename(form.closest('.channel-category'), payload.name);
         updateCategoryOptions(payload);
+        window.tubyShowSuccess?.('Category renamed.');
       }
       document.dispatchEvent(new Event('tuby:update'));
     } catch {
@@ -319,6 +322,10 @@
   };
 
   const showError = (form, message) => {
+    if (form.matches('.category-rename')) {
+      if (message !== '') window.tubyShowError?.(message);
+      return;
+    }
     const error = form.querySelector('[data-category-error]');
     error.textContent = message;
     error.hidden = message === '';

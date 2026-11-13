@@ -14,6 +14,7 @@ import (
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/youtube"
 )
 
 type orderRequest struct {
@@ -64,12 +65,13 @@ func newHandler(subscriptions deps.Subscriptions, updates *events.Hub, stores ..
 func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
 	preferences, err := contentPreferences(request)
 	if err != nil {
-		respond.Error(writer, http.StatusBadRequest, "invalid category")
+		respond.Error(writer, http.StatusBadRequest, "Select a valid category.")
 		return
 	}
 	_, err = h.subscriptions.Add(request.Context(), request.FormValue("url"), preferences)
 	if err != nil {
-		respond.Error(writer, http.StatusBadRequest, "add channel failed")
+		failure := classifyAddError(err)
+		respond.Error(writer, failure.status, failure.message)
 		return
 	}
 	writer.Header().Set("HX-Redirect", "/")
@@ -80,7 +82,7 @@ func (h *handler) add(writer http.ResponseWriter, request *http.Request) {
 func (h *handler) updateSettings(writer http.ResponseWriter, request *http.Request) {
 	preferences, err := contentPreferences(request)
 	if err != nil {
-		respond.Error(writer, http.StatusBadRequest, "invalid category")
+		respond.Error(writer, http.StatusBadRequest, "Select a valid category.")
 		return
 	}
 	err = h.subscriptions.UpdateSettings(
@@ -89,7 +91,7 @@ func (h *handler) updateSettings(writer http.ResponseWriter, request *http.Reque
 		preferences,
 	)
 	if err != nil {
-		respond.Error(writer, http.StatusBadRequest, "update channel settings failed")
+		respondUpdateSettingsError(writer, err)
 		return
 	}
 	triggerUpdate(writer)
@@ -119,7 +121,7 @@ func (h *handler) updateNotification(writer http.ResponseWriter, request *http.R
 	}
 	var payload notificationRequest
 	if err := bind.JSON(writer, request, &payload); err != nil || !payload.Level.Valid() {
-		respond.Error(writer, http.StatusBadRequest, "invalid notification level")
+		respond.Error(writer, http.StatusBadRequest, "Select a valid notification level.")
 		return
 	}
 	channelID := chi.URLParam(request, "channelID")
@@ -169,7 +171,7 @@ func (h *handler) fetch(writer http.ResponseWriter, request *http.Request) {
 
 func (h *handler) markChannelSeen(writer http.ResponseWriter, request *http.Request) {
 	if err := h.store.MarkChannelWatched(request.Context(), chi.URLParam(request, "channelID")); err != nil {
-		respond.Error(writer, http.StatusInternalServerError, "mark channel as seen failed")
+		respond.Error(writer, http.StatusInternalServerError, "Tuby could not mark this channel as watched. Try again.")
 		return
 	}
 	h.publish(events.Update{Reason: "channel.seen", Scopes: events.AllScopes(), ChannelIDs: []string{chi.URLParam(request, "channelID")}})
@@ -203,7 +205,7 @@ func (h *handler) removeLater(writer http.ResponseWriter, request *http.Request)
 func (h *handler) markSeen(writer http.ResponseWriter, request *http.Request) {
 	videoID := chi.URLParam(request, "videoID")
 	if err := h.store.MarkVideoWatched(request.Context(), videoID); err != nil {
-		respond.Error(writer, http.StatusNotFound, "video not found")
+		respondVideoMutationError(writer, err, "mark this video as watched")
 		return
 	}
 	h.publish(events.Update{Reason: "video.seen", Scopes: events.AllScopes(), VideoIDs: []string{videoID}})
@@ -214,7 +216,7 @@ func (h *handler) markSeen(writer http.ResponseWriter, request *http.Request) {
 func (h *handler) setLater(writer http.ResponseWriter, request *http.Request, enabled bool) {
 	videoID := chi.URLParam(request, "videoID")
 	if err := h.store.SetVideoWatchLater(request.Context(), videoID, enabled); err != nil {
-		respond.Error(writer, http.StatusNotFound, "video not found")
+		respondVideoMutationError(writer, err, "update Watch later")
 		return
 	}
 	h.publish(events.Update{Reason: "video.watch_later", Scopes: events.AllScopes(), VideoIDs: []string{videoID}})
@@ -257,18 +259,49 @@ func optionalCategoryID(value string) (int64, error) {
 
 func respondChannelError(writer http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrChannelNotFound) {
-		respond.Error(writer, http.StatusNotFound, "channel not found")
+		respond.Error(writer, http.StatusNotFound, "This channel no longer exists.")
 		return
 	}
-	respond.Error(writer, http.StatusBadGateway, "channel operation failed")
+	var fetchError *youtube.FetchError
+	if errors.As(err, &fetchError) {
+		failure := classifyFeedFetchError(fetchError)
+		respond.Error(writer, failure.status, failure.message)
+		return
+	}
+	if errors.Is(err, subscription.ErrChannelFeedUnavailable) {
+		respond.Error(writer, http.StatusBadGateway, "YouTube returned an unreadable RSS feed. Try again later.")
+		return
+	}
+	respond.Error(writer, http.StatusInternalServerError, "Tuby could not complete this channel action. Try again.")
+}
+
+func respondUpdateSettingsError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, subscription.ErrVideoTypesRequired):
+		respond.Error(writer, http.StatusBadRequest, "Select Long, Shorts, or both.")
+	case errors.Is(err, store.ErrCategoryNotFound):
+		respond.Error(writer, http.StatusBadRequest, "That category no longer exists. Refresh the page and try again.")
+	case errors.Is(err, store.ErrChannelNotFound):
+		respond.Error(writer, http.StatusNotFound, "This channel no longer exists.")
+	default:
+		respond.Error(writer, http.StatusInternalServerError, "Tuby could not save these settings. Try again.")
+	}
+}
+
+func respondVideoMutationError(writer http.ResponseWriter, err error, action string) {
+	if errors.Is(err, store.ErrVideoNotFound) {
+		respond.Error(writer, http.StatusNotFound, "This video no longer exists in Tuby.")
+		return
+	}
+	respond.Error(writer, http.StatusInternalServerError, "Tuby could not "+action+". Try again.")
 }
 
 func respondChannelNotificationError(writer http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrChannelNotFound) {
-		respond.Error(writer, http.StatusNotFound, "channel not found")
+		respond.Error(writer, http.StatusNotFound, "This channel no longer exists.")
 		return
 	}
-	respond.Error(writer, http.StatusInternalServerError, "update channel notification failed")
+	respond.Error(writer, http.StatusInternalServerError, "Tuby could not update this notification level. Try again.")
 }
 
 func failures(values []subscription.RefreshFailure) []refreshFailure {

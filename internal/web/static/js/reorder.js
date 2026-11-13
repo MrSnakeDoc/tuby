@@ -89,7 +89,6 @@
     setListActionsDisabled(list, null, true);
     setPageActionsDisabled(actions, button, true);
     setButtonIcon(button, build, true);
-    showSaveError(list, '');
   };
 
   const leaveEditMode = (list, actions, button, build, state) => {
@@ -103,7 +102,6 @@
     });
     setPageActionsDisabled(actions, button, false);
     setButtonIcon(button, build, false);
-    showSaveError(list, '');
     state.editing = false;
   };
 
@@ -122,7 +120,6 @@
     setListActionsDisabled(list, trigger, true);
     setPageActionsDisabled(actions, null, true);
     setCategoryButtonIcon(trigger, build, true);
-    showSaveError(list, '');
   };
 
   const leaveCategoryEditMode = (list, actions, section, trigger, build, state) => {
@@ -137,7 +134,6 @@
     updateEmptyStates(list);
     setPageActionsDisabled(actions, null, false);
     setCategoryButtonIcon(trigger, build, false);
-    showSaveError(list, '');
     state.editing = false;
     state.categoryMode = null;
   };
@@ -145,7 +141,6 @@
   const saveOrder = async (list, actions, button, build, state) => {
     finishDrag(state);
     button.disabled = true;
-    showSaveError(list, '');
     try {
       const response = await fetch('/api/categories/order', {
         method: 'POST',
@@ -154,13 +149,13 @@
       });
       window.tubyReloadIfStale?.(response);
       if (!response.ok) {
-        showSaveError(list, 'Could not save this order. Your changes are still editable.');
+        showSaveFailure(await saveErrorMessage(response));
         return;
       }
       leaveEditMode(list, actions, button, build, state);
       document.dispatchEvent(new Event('tuby:reorder-finished'));
     } catch {
-      showSaveError(list, 'Could not save this order. Your changes are still editable.');
+      showSaveFailure('Tuby could not reach the server. Your changes are still editable.');
     } finally {
       button.disabled = false;
     }
@@ -169,18 +164,17 @@
   const saveCategoryOrder = async (list, actions, section, trigger, build, state) => {
     finishDrag(state);
     trigger.disabled = true;
-    showSaveError(list, '');
     try {
       const response = await persistOrder(list);
       window.tubyReloadIfStale?.(response);
       if (!response.ok) {
-        showSaveError(list, 'Could not save this order. Your changes are still editable.');
+        showSaveFailure(await saveErrorMessage(response));
         return;
       }
       leaveCategoryEditMode(list, actions, section, trigger, build, state);
       document.dispatchEvent(new Event('tuby:reorder-finished'));
     } catch {
-      showSaveError(list, 'Could not save this order. Your changes are still editable.');
+      showSaveFailure('Tuby could not reach the server. Your changes are still editable.');
     } finally {
       trigger.disabled = false;
     }
@@ -542,18 +536,15 @@
     list.querySelectorAll('.channel-category.is-renaming [data-category-cancel]').forEach(button => button.click());
   };
 
-  const showSaveError = (list, message) => {
-    let error = list.previousElementSibling;
-    if (!error?.matches('[data-reorder-error]')) {
-      error = document.createElement('div');
-      error.dataset.reorderError = '';
-      error.className = 'reorder-error';
-      error.setAttribute('role', 'alert');
-      list.before(error);
-    }
-    error.textContent = message;
-    error.hidden = message === '';
+  const saveErrorMessage = async response => {
+    const message = await (window.tubyFetchErrorMessage?.(
+      response,
+      'Could not save this order.',
+    ) ?? Promise.resolve('Could not save this order.'));
+    return `${message} Your changes are still editable.`;
   };
+
+  const showSaveFailure = message => window.tubyShowError?.(message);
 
   const dragIntent = target => {
     if (target.closest('.channel-card')) return 'channel';

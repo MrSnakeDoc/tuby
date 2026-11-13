@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/events"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/store"
 	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/subscription"
+	"git.nexacloud.dev/MrSnakeDoc/tuby/internal/youtube"
 )
 
 func TestDeleteRoute(t *testing.T) {
@@ -102,6 +104,71 @@ func TestAddBindsSelectedCategory(t *testing.T) {
 	}
 }
 
+func TestAddReturnsUsefulErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		message string
+	}{
+		{
+			name: "invalid channel reference", err: subscription.ErrInvalidChannelReference,
+			status: http.StatusBadRequest, message: "Enter a valid YouTube channel URL or UC… channel ID.",
+		},
+		{
+			name: "missing category", err: store.ErrCategoryNotFound,
+			status: http.StatusBadRequest, message: "That category no longer exists. Refresh the page and try again.",
+		},
+		{
+			name: "channel resolution", err: subscription.ErrChannelResolution,
+			status:  http.StatusBadGateway,
+			message: "YouTube could not resolve this channel. Check the URL or try again later.",
+		},
+		{
+			name: "RSS not found", err: &youtube.FetchError{StatusCode: http.StatusNotFound},
+			status:  http.StatusBadGateway,
+			message: "YouTube returned 404 for this channel's RSS feed. This is often temporary; try again later.",
+		},
+		{
+			name: "rate limited", err: &youtube.FetchError{StatusCode: http.StatusTooManyRequests, Temporary: true},
+			status:  http.StatusServiceUnavailable,
+			message: "YouTube is rate-limiting requests. Try again later.",
+		},
+		{
+			name: "temporary upstream failure", err: &youtube.FetchError{StatusCode: http.StatusBadGateway, Temporary: true},
+			status: http.StatusServiceUnavailable, message: "YouTube is temporarily unavailable. Try again later.",
+		},
+		{
+			name: "invalid feed", err: subscription.ErrChannelFeedUnavailable,
+			status: http.StatusBadGateway, message: "YouTube returned an unreadable RSS feed. Try again later.",
+		},
+		{
+			name: "internal failure", err: errors.New("database unavailable"),
+			status: http.StatusInternalServerError, message: "Tuby could not add this channel. Try again later.",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &stubSubscriptions{addErr: test.err}
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/api/channels",
+				strings.NewReader("url=https%3A%2F%2Fyoutube.com%2F%40example&include_long=on"),
+			)
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			newRouter(service).ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d", response.Code, test.status)
+			}
+			want := `{"error":` + strconv.Quote(test.message) + "}\n"
+			if response.Body.String() != want {
+				t.Fatalf("body = %q, want %q", response.Body.String(), want)
+			}
+		})
+	}
+}
+
 func TestUpdateSettingsRejectsInvalidCategoryID(t *testing.T) {
 	service := &stubSubscriptions{}
 	router := newRouter(service)
@@ -115,6 +182,53 @@ func TestUpdateSettingsRejectsInvalidCategoryID(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUpdateSettingsReturnsUsefulErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		message string
+	}{
+		{
+			name: "video types", err: subscription.ErrVideoTypesRequired,
+			status: http.StatusBadRequest, message: "Select Long, Shorts, or both.",
+		},
+		{
+			name: "category", err: store.ErrCategoryNotFound,
+			status:  http.StatusBadRequest,
+			message: "That category no longer exists. Refresh the page and try again.",
+		},
+		{
+			name: "channel", err: store.ErrChannelNotFound,
+			status: http.StatusNotFound, message: "This channel no longer exists.",
+		},
+		{
+			name: "internal", err: errors.New("database unavailable"),
+			status: http.StatusInternalServerError, message: "Tuby could not save these settings. Try again.",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &stubSubscriptions{settingsErr: test.err}
+			request := httptest.NewRequest(
+				http.MethodPut,
+				"/api/channels/UC123/settings",
+				strings.NewReader("include_long=on&category_id=1"),
+			)
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			newRouter(service).ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d", response.Code, test.status)
+			}
+			want := `{"error":` + strconv.Quote(test.message) + "}\n"
+			if response.Body.String() != want {
+				t.Fatalf("body = %q, want %q", response.Body.String(), want)
+			}
+		})
 	}
 }
 
@@ -248,7 +362,9 @@ type stubSubscriptions struct {
 	report            subscription.RefreshReport
 	reportErr         error
 	settings          subscription.ContentPreferences
+	settingsErr       error
 	added             subscription.ContentPreferences
+	addErr            error
 	notificationStore *store.Store
 }
 
@@ -263,12 +379,12 @@ func (s *stubSubscriptions) Add(
 	preferences subscription.ContentPreferences,
 ) (store.Channel, error) {
 	s.added = preferences
-	return store.Channel{}, nil
+	return store.Channel{}, s.addErr
 }
 
 func (s *stubSubscriptions) UpdateSettings(_ context.Context, _ string, settings subscription.ContentPreferences) error {
 	s.settings = settings
-	return nil
+	return s.settingsErr
 }
 
 func (s *stubSubscriptions) UpdateNotificationLevel(

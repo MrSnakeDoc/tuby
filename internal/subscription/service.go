@@ -116,7 +116,7 @@ func (s *Service) Add(ctx context.Context, input string, preferences ContentPref
 	}
 	reference, err := youtube.NormalizeChannelReference(input)
 	if err != nil {
-		return store.Channel{}, err
+		return store.Channel{}, fmt.Errorf("%w: %w", ErrInvalidChannelReference, err)
 	}
 	channelID, err := s.resolve(ctx, reference)
 	if err != nil {
@@ -135,10 +135,10 @@ func (s *Service) Add(ctx context.Context, input string, preferences ContentPref
 	}
 	result, err := s.feeds.Fetch(ctx, channelID, youtube.FetchOptions{})
 	if err != nil {
-		return store.Channel{}, fmt.Errorf("fetch initial channel feed: %w", err)
+		return store.Channel{}, fmt.Errorf("%w: %w", ErrChannelFeedUnavailable, err)
 	}
 	if result.NotModified {
-		return store.Channel{}, fmt.Errorf("initial channel feed must contain content")
+		return store.Channel{}, fmt.Errorf("%w: initial channel feed must contain content", ErrChannelFeedUnavailable)
 	}
 	if err := s.saveFeed(ctx, reference.SourceURL, channelID, preferences, result, nil); err != nil {
 		return store.Channel{}, err
@@ -234,7 +234,7 @@ func (s *Service) resolve(ctx context.Context, reference youtube.ChannelReferenc
 	}
 	channelID, err := s.resolver.ResolveChannelID(ctx, reference.SourceURL)
 	if err != nil {
-		return "", fmt.Errorf("resolve YouTube channel: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrChannelResolution, err)
 	}
 	return channelID, nil
 }
@@ -250,7 +250,7 @@ func (s *Service) saveFeed(
 		return err
 	}
 	if result.Feed.ChannelID != channelID {
-		return fmt.Errorf("YouTube RSS feed resolved to another channel")
+		return fmt.Errorf("%w: resolved to another channel", ErrChannelFeedUnavailable)
 	}
 	before, err := s.contentVersion(ctx, channelID)
 	if err != nil {
@@ -334,7 +334,7 @@ func (s *Service) recordFailure(ctx context.Context, channel store.Channel, caus
 
 func validFeed(feed youtube.Feed) error {
 	if feed.ChannelID == "" || feed.Title == "" {
-		return fmt.Errorf("YouTube RSS feed has incomplete channel metadata")
+		return fmt.Errorf("%w: incomplete channel metadata", ErrChannelFeedUnavailable)
 	}
 	return nil
 }
@@ -360,7 +360,7 @@ func storeVideos(videos []youtube.Video, preferences ContentPreferences) []store
 
 func validatePreferences(preferences ContentPreferences) error {
 	if !preferences.IncludeLong && !preferences.IncludeShorts {
-		return fmt.Errorf("at least one video type must be enabled")
+		return ErrVideoTypesRequired
 	}
 	return nil
 }

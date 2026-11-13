@@ -74,7 +74,6 @@
   const saveLevel = async (picker, level) => {
     if (!picker || !levels[level] || picker.dataset.saving === 'true') return;
     setSaving(picker, true);
-    showError(picker, '');
     try {
       const response = await fetch(
         `/api/channels/${encodeURIComponent(picker.dataset.channelId)}/notification`,
@@ -88,12 +87,16 @@
         },
       );
       window.tubyReloadIfStale?.(response);
-      if (!response.ok) throw new Error('notification update failed');
+      if (!response.ok) {
+        window.tubyShowError?.(await fetchErrorMessage(response));
+        return;
+      }
       const saved = await response.json();
       updateChannelPickers(saved.channel_id, saved.level);
       closePicker(true);
+      window.tubyShowSuccess?.('Notification priority updated.');
     } catch {
-      showError(picker, 'Could not save this notification level.');
+      window.tubyShowError?.('Tuby could not reach the server. This notification level was not saved.');
     } finally {
       setSaving(picker, false);
     }
@@ -136,12 +139,10 @@
     });
   };
 
-  const showError = (picker, message) => {
-    const error = pickerMenu(picker)?.querySelector('[data-notification-error]');
-    if (!error) return;
-    error.textContent = message;
-    error.hidden = message === '';
-  };
+  const fetchErrorMessage = response => window.tubyFetchErrorMessage?.(
+    response,
+    'Could not save this notification level.',
+  ) ?? Promise.resolve('Could not save this notification level.');
 
   const pickerMenu = picker => picker === openPicker
     ? openMenu

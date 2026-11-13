@@ -10,6 +10,8 @@
   <link rel="icon" href="/static/img/favicon.svg?v={{.BuildID}}" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/style.css?v={{.BuildID}}">
   <script src="/static/js/htmx.min.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/request-feedback.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/confirm-dialog.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/video-seen.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/video-duration.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/scroll-memory.js?v={{.BuildID}}" defer></script>
@@ -18,6 +20,8 @@
   <script src="/static/js/category-management.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/keyboard-shortcuts.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/reorder.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/channel-add.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/channel-settings.js?v={{.BuildID}}" defer></script>
   <script src="/static/js/content-settings.js?v={{.BuildID}}" defer></script>
   {{if .NotificationsEnabled}}<script src="/static/js/notification-settings.js?v={{.BuildID}}" defer></script>{{end}}
   <script src="/static/js/dialogs.js?v={{.BuildID}}" defer></script>
@@ -56,7 +60,8 @@
     </nav>
   </div>
   <dialog class="add-dialog" id="channel-dialog" onclose="this.querySelector('form').reset()">
-    <form hx-post="/api/channels" hx-swap="none" method="post" data-content-settings>
+    <form hx-post="/api/channels" hx-swap="none" hx-disabled-elt="find button[type='submit']"
+      method="post" data-content-settings data-add-channel>
       <div class="dialog-heading">
         <div><span class="eyebrow">SUBSCRIPTIONS</span><h2>Add a channel</h2></div>
         <button class="icon-button close-button" type="button" onclick="this.closest('dialog').close()">×</button>
@@ -87,6 +92,8 @@
         <label class="content-option"><input type="checkbox" name="include_long" checked><span>Long</span></label>
         <label class="content-option"><input type="checkbox" name="include_shorts"><span>Shorts</span></label>
       </fieldset>
+      <span class="field-error add-channel-error" role="alert" aria-live="polite"
+        data-add-channel-error hidden></span>
       <button class="primary-button" type="submit">Add channel <span>↗</span></button>
     </form>
   </dialog>

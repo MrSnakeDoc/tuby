@@ -13,7 +13,8 @@
       </div>
       <div class="section-meta">
         {{len .Channels}} CHANNELS
-        <button class="inline-refresh" hx-post="/api/channels/fetch" hx-swap="none" title="Refresh all channels">↻</button>
+        <button class="inline-refresh" hx-post="/api/channels/fetch" hx-swap="none"
+          data-refresh-channels title="Refresh all channels">↻</button>
       </div>
     </div>
     <div class="category-list">
@@ -33,7 +34,7 @@
                 </button>
                 <button class="category-action" type="button" hx-delete="/api/categories/{{.ID}}"
                   hx-confirm="Delete {{.Name}}? Its channels will be moved to the default category."
-                  hx-swap="none" title="Delete {{.Name}}">
+                  hx-swap="none" data-success-message="Category deleted." title="Delete {{.Name}}">
                   <img src="/static/img/trash.svg?v={{$.BuildID}}" alt="">
                 </button>
               {{end}}
@@ -43,7 +44,6 @@
               <form class="category-rename" action="/api/categories/{{.ID}}" hidden>
                 <label class="sr-only" for="category-name-{{.ID}}">Category name</label>
                 <input id="category-name-{{.ID}}" name="name" value="{{.Name}}" maxlength="50" required>
-                <span class="field-error" data-category-error hidden></span>
                 <div class="category-rename-actions">
                   <button class="secondary-button" type="button" data-category-cancel>Cancel</button>
                   <button class="primary-button" type="submit">Save</button>
@@ -67,7 +67,8 @@
                   </a>
                   {{if $.NotificationsEnabled}}{{template "notification-picker" .}}{{end}}
                   <button class="channel-delete" hx-delete="/api/channels/{{.ID}}"
-                    hx-confirm="Remove {{.Title}} and all its videos?" hx-swap="none" title="Delete channel">
+                    hx-confirm="Remove {{.Title}} and all its videos?" hx-swap="none"
+                    data-success-message="Channel deleted." title="Delete channel">
                     <img src="/static/img/trash.svg?v={{$.BuildID}}" alt="">
                   </button>
                 </article>
@@ -109,7 +110,8 @@
         <div class="section-meta">
           {{if .NotificationsEnabled}}{{template "notification-picker" .CurrentChannel}}{{end}}
           {{.CurrentChannel.VideoCount}} VIDEOS
-          <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/fetch" hx-swap="none">↻</button>
+          <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/fetch"
+            hx-swap="none" data-refresh-channels>↻</button>
           <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/seen"
             hx-confirm="Mark every video from this channel as watched?" hx-swap="none" title="Mark channel as watched">
             <img src="/static/img/seen.svg?v={{.BuildID}}" alt="">
@@ -122,7 +124,9 @@
       </div>
       <dialog class="add-dialog" id="channel-settings-dialog">
         <form hx-put="/api/channels/{{.CurrentChannel.ID}}/settings" hx-swap="none"
-          hx-on::after-request="if(event.detail.successful)this.closest('dialog').close()" data-content-settings>
+          hx-disabled-elt="find button[type='submit']"
+          hx-on::after-request="if(event.detail.successful)this.closest('dialog').close()"
+          data-content-settings data-channel-settings>
           <div class="dialog-heading">
             <div><span class="eyebrow">CHANNEL SETTINGS</span><h2>{{.CurrentChannel.Title}}</h2></div>
             <button class="icon-button close-button" type="button" onclick="this.closest('dialog').close()">×</button>
@@ -140,6 +144,8 @@
             <label class="content-option"><input type="checkbox" name="include_long" {{if .CurrentChannel.IncludeLong}}checked{{end}}><span>Long</span></label>
             <label class="content-option"><input type="checkbox" name="include_shorts" {{if .CurrentChannel.IncludeShorts}}checked{{end}}><span>Shorts</span></label>
           </fieldset>
+          <span class="field-error modal-action-error" role="alert" aria-live="polite"
+            data-channel-settings-error hidden></span>
           <div class="confirm-actions">
             <button class="secondary-button" type="button" onclick="this.closest('dialog').close()">Cancel</button>
             <button class="primary-button" type="submit">Save</button>
@@ -192,7 +198,5 @@
     {{end}}
   {{end}}
 </section>
-<script>
-document.querySelectorAll('.dock-link').forEach(function(link){var page='{{.Page}}';var active=(link.getAttribute('href')==='/'&&page==='home')||(link.getAttribute('href')==='/missed'&&page==='missed')||(link.getAttribute('href')==='/watch-later'&&page==='later');link.classList.toggle('is-active',active)});if(!document.querySelector('#confirm-dialog')){var dialog=document.createElement('dialog');dialog.id='confirm-dialog';dialog.className='add-dialog confirm-dialog';dialog.innerHTML='<div class="dialog-heading"><div><span class="eyebrow">CONFIRM ACTION</span><h2>Are you sure?</h2></div></div><p class="confirm-message"></p><div class="confirm-actions"><button class="secondary-button" type="button">Cancel</button><button class="primary-button" type="button">Confirm</button></div>';document.body.append(dialog);document.body.addEventListener('htmx:confirm',function(event){if(!event.target.hasAttribute('hx-confirm'))return;event.preventDefault();dialog.querySelector('.confirm-message').textContent=event.detail.question;dialog.querySelector('.secondary-button').onclick=function(){dialog.close()};dialog.querySelector('.primary-button').onclick=function(){dialog.close();event.detail.issueRequest(true)};dialog.showModal()})}
-</script>
+<script>document.querySelectorAll('.dock-link').forEach(function(link){var page='{{.Page}}';var active=(link.getAttribute('href')==='/'&&page==='home')||(link.getAttribute('href')==='/missed'&&page==='missed')||(link.getAttribute('href')==='/watch-later'&&page==='later');link.classList.toggle('is-active',active)});</script>
 {{end}}
