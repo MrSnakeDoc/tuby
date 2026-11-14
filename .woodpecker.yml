@@ -1,0 +1,56 @@
+---
+when:
+  - event: tag
+    ref: refs/tags/v*
+
+steps:
+  - name: build-check
+    image: golang:1.27.4-alpine
+    commands:
+      - echo "🔨 Checking if code compiles..."
+      - apk add --no-cache git
+      - go build ./... > /dev/null 2>&1
+      - echo "✅ Build check passed"
+
+  - name: vulnerability-scan
+    image: golang:1.27.4-alpine
+    commands:
+      - echo "🔒 Scanning for vulnerabilities..."
+      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - govulncheck ./...
+      - echo "✅ No vulnerabilities found"
+
+  - name: lint
+    image: golangci/golangci-lint:v2.15.0-alpine
+    commands:
+      - echo "🔍 Running linters..."
+      - golangci-lint run --config .golangci.yml
+      - echo "✅ Linting passed"
+
+  - name: test
+    image: golang:1.27.4-alpine
+    commands:
+      - echo "🧪 Running tests..."
+      - go test -v ./...
+      - echo "✅ All tests passed"
+
+  - name: docker
+    image: woodpeckerci/plugin-docker-buildx
+    settings:
+      repo: 
+        from_secret: CI_REPO
+      registry:
+        from_secret: DOCKER_REGISTRY
+      username:
+        from_secret: REGISTRY_USERNAME
+      password:
+        from_secret: FORGEJO_REGISTRY_TOKEN
+      tags:
+        - latest
+        - ${CI_COMMIT_TAG}
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      build_args:
+        VERSION: ${CI_COMMIT_TAG}
+        GIT_COMMIT: ${CI_COMMIT_SHA}

@@ -1,0 +1,32 @@
+# Build artifacts and binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+bin/
+data/
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Test and coverage output
+*.out
+coverage.html
+
+# Local development configuration
+.env
+.env.*
+!.env.example
+data/
+Makefile.*
+.local
+Makefile.local
+
+# Dependencies
+vendor/
+
+# Private notes and local tooling
+.internal/

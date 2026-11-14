@@ -1,0 +1,35 @@
+{{define "dock-updates"}}
+<span id="missed-count" class="dock-count" hx-swap-oob="outerHTML" {{if not .MissedCount}}hidden{{end}}>{{compactCount .MissedCount}}</span>
+<span id="watch-later-count" class="dock-count" hx-swap-oob="outerHTML" {{if not .WatchLaterCount}}hidden{{end}}>{{compactCount .WatchLaterCount}}</span>
+{{end}}
+
+{{define "notification-picker"}}
+<div class="notification-picker" data-notification-picker data-channel-id="{{.ID}}"
+  data-notification-level="{{.NotificationLevel}}">
+  <button class="notification-toggle" type="button" data-notification-toggle
+    aria-haspopup="menu" aria-expanded="false" aria-controls="notification-menu-{{.ID}}"
+    aria-label="Notifications for {{.Title}}: {{notificationLabel .NotificationLevel}}"
+    title="Notifications: {{notificationLabel .NotificationLevel}}">
+    <img src="/static/img/{{notificationIcon .NotificationLevel}}.svg?v={{.BuildID}}" alt="">
+  </button>
+  <div class="notification-menu" id="notification-menu-{{.ID}}" role="menu"
+    aria-label="Notification level for {{.Title}}" data-notification-menu hidden>
+    <button type="button" role="menuitemradio" data-notification-option data-level="off">
+      <img src="/static/img/cloud-hail.svg?v={{.BuildID}}" alt="">
+      <span><strong>Off</strong><small>No notifications</small></span>
+    </button>
+    <button type="button" role="menuitemradio" data-notification-option data-level="low">
+      <img src="/static/img/bell-electric.svg?v={{.BuildID}}" alt="">
+      <span><strong>Wake Me Up Before You Go-Go!</strong><small>Low</small></span>
+    </button>
+    <button type="button" role="menuitemradio" data-notification-option data-level="medium">
+      <img src="/static/img/disc-3.svg?v={{.BuildID}}" alt="">
+      <span><strong>I Like to Move It!</strong><small>Medium</small></span>
+    </button>
+    <button type="button" role="menuitemradio" data-notification-option data-level="critical">
+      <img src="/static/img/dog.svg?v={{.BuildID}}" alt="">
+      <span><strong>Who Let the Dogs Out?!</strong><small>Critical</small></span>
+    </button>
+  </div>
+</div>
+{{end}}

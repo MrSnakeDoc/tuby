@@ -1,0 +1,589 @@
+package subscription
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/MrSnakeDoc/tuby/internal/events"
+	"github.com/MrSnakeDoc/tuby/internal/logger"
+	"github.com/MrSnakeDoc/tuby/internal/store"
+	"github.com/MrSnakeDoc/tuby/internal/youtube"
+)
+
+func TestAddSavesChannelAndInitialVideosAsUnseen(t *testing.T) {
+	database := openTestStore(t)
+	service := New(database, testResolver{}, &testFeedClient{result: feedResult()})
+	channel, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.Title != "Veritasium" || channel.AvatarURL != "https://example.com/avatar.jpg" {
+		t.Fatalf("channel = %#v", channel)
+	}
+}
+
+func TestAddNeverEnqueuesNotificationsForInitialVideos(t *testing.T) {
+	database := openTestStore(t)
+	updates := &testPublisher{}
+	service := New(database, testResolver{}, &testFeedClient{result: feedResult()}, updates)
+	configureTestNotifications(service, []string{"Configured message"})
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	assertOutboxCount(t, database, 0)
+	if len(updates.values) != 1 || len(updates.values[0].BrowserNotifications) != 0 {
+		t.Fatalf("initial updates = %#v", updates.values)
+	}
+}
+
+func TestRefreshEnqueuesOnlyNewEligibleVideosAndFreezesNotification(t *testing.T) {
+	database := openTestStore(t)
+	initial := feedResult()
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	configureTestNotifications(service, []string{"Remember this exact message"})
+	ctx := context.Background()
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	activation := initial.Feed.Videos[0].Published.Add(12 * time.Hour)
+	if err := database.UpdateChannelNotificationLevel(
+		ctx, initial.Feed.ChannelID, store.NotificationMedium, activation,
+	); err != nil {
+		t.Fatal(err)
+	}
+	refresh := feedResult()
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("before-activation", "Before activation", activation.Add(-time.Minute)),
+		testLongVideo("new-video", "New eligible video", activation.Add(time.Minute)),
+		shortVideo(),
+	)
+	updates := &testPublisher{}
+	service = New(database, testResolver{}, &testFeedClient{result: refresh}, updates)
+	configureTestNotifications(service, []string{"Remember this exact message"})
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := requireSingleOutboxEntry(t, database)
+	if entry.VideoYouTubeID != "new-video" || entry.VideoTitle != "New eligible video" ||
+		entry.ChannelTitle != "Veritasium" || entry.Level != store.NotificationMedium ||
+		entry.Variant != store.NotificationVariantVideoWithMessage || entry.Message != "Remember this exact message" {
+		t.Fatalf("outbox entry = %#v", entry)
+	}
+	if err := database.UpdateChannelNotificationLevel(
+		ctx, refresh.Feed.ChannelID, store.NotificationCritical, activation.Add(time.Hour),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	entry = requireSingleOutboxEntry(t, database)
+	if entry.Level != store.NotificationMedium {
+		t.Fatalf("outbox after repeated refresh = %#v", entry)
+	}
+	assertSingleBrowserNotification(t, updates.values, "new-video", "Veritasium", "New eligible video")
+}
+
+func TestRefreshWithoutMessagesUsesMessageFreeVariant(t *testing.T) {
+	database := openTestStore(t)
+	initial := feedResult()
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	ctx := context.Background()
+	if _, err := service.Add(ctx, initial.Feed.ChannelID, longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	activation := initial.Feed.Videos[0].Published.Add(time.Hour)
+	if err := database.UpdateChannelNotificationLevel(ctx, initial.Feed.ChannelID, store.NotificationLow, activation); err != nil {
+		t.Fatal(err)
+	}
+	refresh := feedResult()
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("new-video", "New video", activation.Add(time.Minute)),
+	)
+	updates := &testPublisher{}
+	service = New(database, testResolver{}, &testFeedClient{result: refresh}, updates)
+	configureTestNotifications(service, nil)
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	entry := requireSingleOutboxEntry(t, database)
+	if entry.Variant != store.NotificationVariantVideo || entry.Message != "" {
+		t.Fatalf("outbox entry = %#v", entry)
+	}
+}
+
+func TestRefreshDoesNotEnqueueWhenNavireIsDisabled(t *testing.T) {
+	database := openTestStore(t)
+	initial := feedResult()
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	ctx := context.Background()
+	if _, err := service.Add(ctx, initial.Feed.ChannelID, longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	activation := initial.Feed.Videos[0].Published.Add(time.Hour)
+	if err := database.UpdateChannelNotificationLevel(ctx, initial.Feed.ChannelID, store.NotificationLow, activation); err != nil {
+		t.Fatal(err)
+	}
+	refresh := feedResult()
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("new-video", "New video", activation.Add(time.Minute)),
+	)
+	updates := &testPublisher{}
+	service = New(database, testResolver{}, &testFeedClient{result: refresh}, updates)
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	assertOutboxCount(t, database, 0)
+	assertSingleBrowserNotification(t, updates.values, "new-video", "Veritasium", "New video")
+	if err := database.UpdateChannelNotificationLevel(
+		ctx, initial.Feed.ChannelID, store.NotificationOff, activation.Add(time.Hour),
+	); err != nil {
+		t.Fatal(err)
+	}
+	refresh.Feed.Videos = append(refresh.Feed.Videos,
+		testLongVideo("muted-video", "Muted video", activation.Add(2*time.Hour)),
+	)
+	mutedUpdates := &testPublisher{}
+	service = New(database, testResolver{}, &testFeedClient{result: refresh}, mutedUpdates)
+	if err := service.Refresh(ctx, refresh.Feed.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	if len(mutedUpdates.values) != 1 || len(mutedUpdates.values[0].BrowserNotifications) != 0 {
+		t.Fatalf("browser updates while notifications are off = %#v", mutedUpdates.values)
+	}
+}
+
+func TestRefreshUsesValidatorsAndPreservesVideoStates(t *testing.T) {
+	database := openTestStore(t)
+	initial := &testFeedClient{result: feedResult()}
+	service := New(database, testResolver{}, initial)
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	refresh := &testFeedClient{result: youtube.FetchResult{NotModified: true, ETag: "etag-2"}}
+	service = New(database, testResolver{}, refresh)
+	if err := service.Refresh(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA"); err != nil {
+		t.Fatal(err)
+	}
+	if refresh.options.ETag != "etag-1" || refresh.options.LastModified != "last-modified-1" {
+		t.Fatalf("options = %#v", refresh.options)
+	}
+	channel, err := database.Channel(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.FeedETag != "etag-2" || channel.FeedLastModified != "last-modified-1" || channel.FailureCount != 0 {
+		t.Fatalf("channel = %#v", channel)
+	}
+}
+
+func TestRefreshRecordsFailureAndKeepsVideos(t *testing.T) {
+	database := openTestStore(t)
+	service := New(database, testResolver{}, &testFeedClient{result: feedResult()})
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly()); err != nil {
+		t.Fatal(err)
+	}
+	service = New(database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")})
+	if err := service.Refresh(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA"); err == nil {
+		t.Fatal("Refresh succeeded")
+	}
+	channel, err := database.Channel(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.FailureCount != 1 || channel.NextCheckAt == nil || channel.LastError == "" {
+		t.Fatalf("channel = %#v", channel)
+	}
+}
+
+func TestRefreshAllRefreshesEveryStoredChannel(t *testing.T) {
+	database := openTestStore(t)
+	for _, channelID := range []string{"UCHnyfMqiRRG1u-2MsSQLbXA", "UCXuqSBlHAE6Xw-yeJA0Tunw"} {
+		err := database.SaveSync(context.Background(), store.ChannelSync{
+			Channel: store.Channel{YouTubeID: channelID, SourceURL: "https://www.youtube.com/channel/" + channelID, Title: channelID},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := &testFeedClient{result: youtube.FetchResult{NotModified: true}}
+	service := New(database, testResolver{}, client)
+	report, err := service.RefreshAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Refreshed != 2 || len(report.Failures) != 0 || client.calls != 2 {
+		t.Fatalf("report %#v, calls %d", report, client.calls)
+	}
+}
+
+func TestAddStoresOnlySelectedVideoTypes(t *testing.T) {
+	database := openTestStore(t)
+	result := feedResult()
+	result.Feed.Videos = append(result.Feed.Videos, shortVideo())
+	service := New(database, testResolver{}, &testFeedClient{result: result})
+	preferences := ContentPreferences{IncludeShorts: true}
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", preferences); err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(videos) != 1 || !videos[0].IsShort {
+		t.Fatalf("videos = %#v", videos)
+	}
+}
+
+func TestAddExistingChannelPreservesSettingsAndVideoState(t *testing.T) {
+	database := openTestStore(t)
+	ctx := context.Background()
+	selected, err := database.CreateCategory(ctx, "Selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignored, err := database.CreateCategory(ctx, "Ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &testFeedClient{result: feedResult()}
+	service := New(database, testResolver{}, client)
+	initial := longOnly()
+	initial.CategoryID = selected.ID
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetVideoWatchLater(ctx, "abcdefghijk", true); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := ContentPreferences{IncludeShorts: true, CategoryID: ignored.ID}
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", duplicate); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := database.Channel(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(ctx, channel.YouTubeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 || channel.CategoryID != selected.ID || !channel.IncludeLong || channel.IncludeShorts ||
+		!videos[0].WatchLater || !videos[0].Unseen {
+		t.Fatalf("calls %d, channel %#v, video %#v", client.calls, channel, videos[0])
+	}
+}
+
+func TestUpdateSettingsPersistsAndPurgesDisabledVideosWhenRefreshFails(t *testing.T) {
+	database := openTestStore(t)
+	result := feedResult()
+	result.Feed.Videos = append(result.Feed.Videos, shortVideo())
+	service := New(database, testResolver{}, &testFeedClient{result: result})
+	ctx := context.Background()
+	category, err := database.CreateCategory(ctx, "Science")
+	if err != nil {
+		t.Fatal(err)
+	}
+	both := ContentPreferences{IncludeLong: true, IncludeShorts: true}
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", both); err != nil {
+		t.Fatal(err)
+	}
+	updates := &testPublisher{}
+	warnings := &testWarningLogger{}
+	service = NewWithLogger(
+		database, testResolver{}, &testFeedClient{err: errors.New("upstream unavailable")}, warnings, updates,
+	)
+	updated := longOnly()
+	updated.CategoryID = category.ID
+	if err := service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", updated); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := database.Channel(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(ctx, channel.YouTubeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.CategoryID != category.ID || !channel.IncludeLong || channel.IncludeShorts ||
+		len(videos) != 1 || videos[0].IsShort {
+		t.Fatalf("channel %#v, videos %#v", channel, videos)
+	}
+	if len(updates.values) == 0 {
+		t.Fatal("settings update was not published")
+	}
+	assertRefreshWarning(t, warnings, channel.YouTubeID)
+	published := updates.values[0]
+	if published.Reason != "channel.settings_changed" || len(published.CategoryIDs) != 1 ||
+		published.CategoryIDs[0] != category.ID {
+		t.Fatalf("published update = %#v", published)
+	}
+}
+
+func TestUpdateSettingsWaitsForConcurrentRefreshAndKeepsNewPreferences(t *testing.T) {
+	database := openTestStore(t)
+	ctx := context.Background()
+	initial := feedResult()
+	initial.Feed.Videos = append(initial.Feed.Videos, shortVideo())
+	service := New(database, testResolver{}, &testFeedClient{result: initial})
+	if _, err := service.Add(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{
+		IncludeLong: true, IncludeShorts: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := newBlockingFeedClient(initial)
+	service = New(database, testResolver{}, client)
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- service.Refresh(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA") }()
+	<-client.started
+
+	settingsDone := make(chan error, 1)
+	go func() {
+		settingsDone <- service.UpdateSettings(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{IncludeShorts: true})
+	}()
+	select {
+	case err := <-settingsDone:
+		close(client.release)
+		t.Fatalf("settings completed during the active refresh: %v", err)
+	case <-time.After(50 * time.Millisecond):
+		close(client.release)
+	}
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-settingsDone; err != nil {
+		t.Fatal(err)
+	}
+	videos, err := database.ChannelVideos(ctx, "UCHnyfMqiRRG1u-2MsSQLbXA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(videos) != 1 || !videos[0].IsShort {
+		t.Fatalf("videos after concurrent settings update = %#v", videos)
+	}
+}
+
+func TestAddRejectsUnknownCategoryBeforeFetching(t *testing.T) {
+	database := openTestStore(t)
+	client := &testFeedClient{result: feedResult()}
+	service := New(database, testResolver{}, client)
+	preferences := longOnly()
+	preferences.CategoryID = 999
+	_, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", preferences)
+	if !errors.Is(err, store.ErrCategoryNotFound) || client.calls != 0 {
+		t.Fatalf("error = %v, fetch calls = %d", err, client.calls)
+	}
+}
+
+func TestContentPreferencesRequireOneVideoType(t *testing.T) {
+	service := New(openTestStore(t), testResolver{}, &testFeedClient{result: feedResult()})
+	if _, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", ContentPreferences{}); !errors.Is(err, ErrVideoTypesRequired) {
+		t.Fatalf("error = %v, want ErrVideoTypesRequired", err)
+	}
+}
+
+func TestAddClassifiesInvalidReferenceAndFeedFailure(t *testing.T) {
+	service := New(openTestStore(t), testResolver{}, &testFeedClient{result: feedResult()})
+	if _, err := service.Add(context.Background(), "not a channel", longOnly()); !errors.Is(err, ErrInvalidChannelReference) {
+		t.Fatalf("invalid reference error = %v", err)
+	}
+	fetchError := &youtube.FetchError{StatusCode: 404}
+	service = New(openTestStore(t), testResolver{}, &testFeedClient{err: fetchError})
+	_, err := service.Add(context.Background(), "UCHnyfMqiRRG1u-2MsSQLbXA", longOnly())
+	var received *youtube.FetchError
+	if !errors.Is(err, ErrChannelFeedUnavailable) || !errors.As(err, &received) || received.StatusCode != 404 {
+		t.Fatalf("feed error = %v", err)
+	}
+}
+
+func TestBackoffCapsAtMaximum(t *testing.T) {
+	if got := backoff(1); got != minimumBackoff {
+		t.Fatalf("first failure backoff = %s", got)
+	}
+	if got := backoff(100); got != maximumBackoff {
+		t.Fatalf("capped backoff = %s", got)
+	}
+}
+
+func openTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	database, err := store.Open(filepath.Join(t.TempDir(), "tuby.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	return database
+}
+
+func configureTestNotifications(service *Service, messages []string) {
+	service.notifications = NotificationConfig{Enabled: true, Messages: messages}
+	service.selectMessage = func(values []string) string {
+		if len(values) == 0 {
+			return ""
+		}
+		return values[0]
+	}
+}
+
+func assertOutboxCount(t *testing.T, database *store.Store, want int) {
+	t.Helper()
+	entries, err := database.PendingNotifications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != want {
+		t.Fatalf("outbox entries = %d, want %d", len(entries), want)
+	}
+}
+
+func assertSingleBrowserNotification(
+	t *testing.T,
+	updates []events.Update,
+	videoID, channelTitle, videoTitle string,
+) {
+	t.Helper()
+	if len(updates) != 1 || len(updates[0].BrowserNotifications) != 1 {
+		t.Fatalf("browser notification updates = %#v", updates)
+	}
+	notification := updates[0].BrowserNotifications[0]
+	if notification.VideoID != videoID || notification.ChannelTitle != channelTitle ||
+		notification.VideoTitle != videoTitle || notification.ThumbnailURL == "" {
+		t.Fatalf("browser notification = %#v", notification)
+	}
+}
+
+func requireSingleOutboxEntry(t *testing.T, database *store.Store) store.OutboxNotification {
+	t.Helper()
+	entries, err := database.PendingNotifications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("outbox entries = %#v, want one", entries)
+	}
+	return entries[0]
+}
+
+func testLongVideo(id, title string, published time.Time) youtube.Video {
+	return youtube.Video{
+		YouTubeID: id, ChannelID: "UCHnyfMqiRRG1u-2MsSQLbXA", Title: title,
+		URL: "https://www.youtube.com/watch?v=" + id, Thumbnail: "https://example.com/" + id + ".jpg",
+		Published: published,
+	}
+}
+
+type testResolver struct{}
+
+type testPublisher struct{ values []events.Update }
+
+type testWarningLogger struct {
+	messages []string
+	fields   [][]logger.Field
+}
+
+func (p *testPublisher) Publish(update events.Update) {
+	p.values = append(p.values, update)
+}
+
+func (l *testWarningLogger) Warn(message string, fields ...logger.Field) {
+	l.messages = append(l.messages, message)
+	l.fields = append(l.fields, fields)
+}
+
+func hasSubscriptionStringField(fields []logger.Field, key, value string) bool {
+	for _, field := range fields {
+		if field.Key == key && field.String == value {
+			return true
+		}
+	}
+	return false
+}
+
+func assertRefreshWarning(t *testing.T, warnings *testWarningLogger, channelID string) {
+	t.Helper()
+	if len(warnings.messages) != 1 || warnings.messages[0] != "Channel refresh after settings update failed" ||
+		!hasSubscriptionStringField(warnings.fields[0], "channel_id", channelID) {
+		t.Fatalf("warnings = %v, fields = %#v", warnings.messages, warnings.fields)
+	}
+}
+
+func (testResolver) ResolveChannelID(context.Context, string) (string, error) {
+	return "UCHnyfMqiRRG1u-2MsSQLbXA", nil
+}
+
+type testFeedClient struct {
+	result  youtube.FetchResult
+	err     error
+	options youtube.FetchOptions
+	calls   int
+}
+
+type blockingFeedClient struct {
+	result  youtube.FetchResult
+	started chan struct{}
+	release chan struct{}
+	mutex   sync.Mutex
+	calls   int
+}
+
+func newBlockingFeedClient(result youtube.FetchResult) *blockingFeedClient {
+	return &blockingFeedClient{result: result, started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (c *blockingFeedClient) Fetch(
+	_ context.Context,
+	_ string,
+	_ youtube.FetchOptions,
+) (youtube.FetchResult, error) {
+	c.mutex.Lock()
+	c.calls++
+	call := c.calls
+	c.mutex.Unlock()
+	if call == 1 {
+		close(c.started)
+		<-c.release
+	}
+	return c.result, nil
+}
+
+func (c *testFeedClient) Fetch(_ context.Context, _ string, options youtube.FetchOptions) (youtube.FetchResult, error) {
+	c.calls++
+	c.options = options
+	return c.result, c.err
+}
+
+func feedResult() youtube.FetchResult {
+	return youtube.FetchResult{
+		Feed: youtube.Feed{
+			ChannelID: "UCHnyfMqiRRG1u-2MsSQLbXA",
+			Title:     "Veritasium",
+			AvatarURL: "https://example.com/avatar.jpg",
+			Videos: []youtube.Video{{
+				YouTubeID: "abcdefghijk", ChannelID: "UCHnyfMqiRRG1u-2MsSQLbXA",
+				Title: "A real video", URL: "https://www.youtube.com/watch?v=abcdefghijk",
+				Thumbnail: "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+				Published: time.Date(2026, time.November, 8, 12, 0, 0, 0, time.UTC),
+			}},
+		},
+		ETag: "etag-1", LastModified: "last-modified-1",
+	}
+}
+
+func longOnly() ContentPreferences {
+	return ContentPreferences{IncludeLong: true}
+}
+
+func shortVideo() youtube.Video {
+	return youtube.Video{
+		YouTubeID: "shortvideo1", ChannelID: "UCHnyfMqiRRG1u-2MsSQLbXA", Title: "A Short",
+		URL: "https://www.youtube.com/shorts/shortvideo1", Thumbnail: "https://example.com/short.jpg",
+		Published: time.Date(2026, time.November, 9, 12, 0, 0, 0, time.UTC), IsShort: true,
+	}
+}

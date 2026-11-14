@@ -1,0 +1,130 @@
+{{define "index.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090a0e">
+  <meta name="tuby-build" content="{{.BuildID}}">
+  <title>Tuby · Your subscriptions, simplified</title>
+  <link rel="icon" href="/static/img/favicon.svg?v={{.BuildID}}" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/style.css?v={{.BuildID}}">
+  <script src="/static/js/htmx.min.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/request-feedback.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/confirm-dialog.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/video-seen.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/video-duration.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/scroll-memory.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/channel-search.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/channel-thumbnails.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/category-management.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/keyboard-shortcuts.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/reorder.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/channel-add.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/channel-settings.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/content-settings.js?v={{.BuildID}}" defer></script>
+  {{if .NotificationsEnabled}}<script src="/static/js/notification-settings.js?v={{.BuildID}}" defer></script>{{end}}
+  <script src="/static/js/dialogs.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/browser-notifications.js?v={{.BuildID}}" defer></script>
+  <script src="/static/js/live-updates.js?v={{.BuildID}}" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" hx-get="/" hx-target="#app" hx-push-url="true">
+        <span class="brand-mark"><img src="/static/img/favicon.svg?v={{.BuildID}}" alt=""></span>
+        <span>tuby<span class="brand-dot">.</span></span>
+      </a>
+      <div class="top-actions">
+        <span class="top-caption">YOUR SPACE. YOUR PACE.</span>
+        <button class="icon-button" type="button" data-add-channel-button
+          onclick="document.querySelector('#channel-dialog').showModal()" title="Add a channel">＋</button>
+      </div>
+    </header>
+    <main id="app">{{template "content" .}}</main>
+    <footer class="site-footer">
+      <span>TUBY. SERIOUSLY UNSERIOUS SUBSCRIPTIONS.</span>
+      <span>PROCRASTINATION, NOW SELF-HOSTED.</span>
+    </footer>
+    <nav class="dock">
+      <a href="/" hx-get="/" hx-target="#app" hx-push-url="true" class="dock-link {{if eq .Page "home"}}is-active{{end}}">
+        <img src="/static/img/home.svg?v={{.BuildID}}" alt=""> <span>Home</span>
+      </a>
+      <a href="/missed" hx-get="/missed" hx-target="#app" hx-push-url="true" class="dock-link {{if eq .Page "missed"}}is-active{{end}}">
+        <img src="/static/img/clock-alert.svg?v={{.BuildID}}" alt=""> <span>Missed</span>
+        <span id="missed-count" class="dock-count" {{if not .MissedCount}}hidden{{end}}>{{compactCount .MissedCount}}</span>
+      </a>
+      <a href="/watch-later" hx-get="/watch-later" hx-target="#app" hx-push-url="true" class="dock-link {{if eq .Page "later"}}is-active{{end}}">
+        <img src="/static/img/bookmark.svg?v={{.BuildID}}" alt=""> <span>Watch later</span>
+        <span id="watch-later-count" class="dock-count" {{if not .WatchLaterCount}}hidden{{end}}>{{compactCount .WatchLaterCount}}</span>
+      </a>
+    </nav>
+  </div>
+  <dialog class="add-dialog" id="channel-dialog" onclose="this.querySelector('form').reset()">
+    <form hx-post="/api/channels" hx-swap="none" hx-disabled-elt="find button[type='submit']"
+      method="post" data-content-settings data-add-channel>
+      <div class="dialog-heading">
+        <div><span class="eyebrow">SUBSCRIPTIONS</span><h2>Add a channel</h2></div>
+        <button class="icon-button close-button" type="button" onclick="this.closest('dialog').close()">×</button>
+      </div>
+      <label for="channel-url">YouTube channel URL</label>
+      <input id="channel-url" name="url" type="text" placeholder="https://www.youtube.com/@channel" required>
+      <p class="field-hint">Paste a YouTube channel URL or a UC… channel ID.</p>
+      <div class="category-field">
+        <label for="channel-category">Category</label>
+        <div class="category-select-row" data-category-select-row>
+          <select class="category-select" id="channel-category" name="category_id" data-category-select required>
+            {{range .Categories}}<option value="{{.ID}}"{{if .IsDefault}} selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+          <button class="category-add-inline" type="button" data-inline-category-start title="Create a category">＋</button>
+        </div>
+        <div class="inline-category-create" data-inline-category-create hidden>
+          <label class="sr-only" for="inline-category-name">New category name</label>
+          <input id="inline-category-name" type="text" data-inline-category-name maxlength="50" autocomplete="off" disabled>
+          <span class="field-error" data-category-error hidden></span>
+          <div class="inline-category-actions">
+            <button class="secondary-button" type="button" data-inline-category-cancel>Cancel</button>
+            <button class="primary-button" type="button" data-inline-category-save>Save</button>
+          </div>
+        </div>
+      </div>
+      <fieldset class="content-options">
+        <legend>Content types</legend>
+        <label class="content-option"><input type="checkbox" name="include_long" checked><span>Long</span></label>
+        <label class="content-option"><input type="checkbox" name="include_shorts"><span>Shorts</span></label>
+      </fieldset>
+      <span class="field-error add-channel-error" role="alert" aria-live="polite"
+        data-add-channel-error hidden></span>
+      <button class="primary-button" type="submit">Add channel <span>↗</span></button>
+    </form>
+  </dialog>
+  <dialog class="add-dialog shortcuts-dialog" id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+    <div class="dialog-heading">
+      <div><span class="eyebrow">KEYBOARD FIRST</span><h2 id="shortcuts-title">Keyboard shortcuts</h2></div>
+      <button class="icon-button close-button" type="button" onclick="this.closest('dialog').close()" aria-label="Close">×</button>
+    </div>
+    <div class="shortcut-groups">
+      <section class="shortcut-group">
+        <h3>Navigation</h3>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>g</kbd><kbd>h</kbd></span><span>Home</span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>g</kbd><kbd>m</kbd></span><span>Missed</span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>g</kbd><kbd>w</kbd></span><span>Watch later</span></div>
+      </section>
+      <section class="shortcut-group">
+        <h3>Actions</h3>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>a</kbd><kbd>c</kbd></span><span>Add channel</span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>a</kbd><kbd>g</kbd></span><span>Add category <small>Home</small></span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>c</kbd><kbd>a</kbd></span><span>Collapse all <small>Home</small></span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>e</kbd><kbd>a</kbd></span><span>Expand all <small>Home</small></span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>n</kbd><kbd>a</kbd></span><span>Allow browser notifications</span></div>
+      </section>
+      <section class="shortcut-group">
+        <h3>General</h3>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>/</kbd></span><span>Search channels</span></div>
+        <div class="shortcut-row"><span class="shortcut-keys"><kbd>?</kbd></span><span>Show shortcuts</span></div>
+      </section>
+    </div>
+  </dialog>
+</body>
+</html>
+{{end}}

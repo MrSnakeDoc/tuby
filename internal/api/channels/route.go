@@ -1,0 +1,25 @@
+package channels
+
+import (
+	"github.com/go-chi/chi/v5"
+
+	"github.com/MrSnakeDoc/tuby/internal/api/deps"
+)
+
+func Register(router chi.Router, dependencies deps.Deps) {
+	handler := newHandler(dependencies.Subscriptions, dependencies.Updates, dependencies.Store)
+	router.Post("/api/channels", handler.add)
+	router.Post("/api/channels/order", handler.saveOrder)
+	router.Delete("/api/channels/{channelID}", handler.delete)
+	router.Post("/api/channels/fetch", handler.fetchAll)
+	router.Post("/api/channels/{channelID}/fetch", handler.fetch)
+	router.Post("/api/channels/{channelID}/seen", handler.markChannelSeen)
+	router.Get("/api/channels/{channelID}/settings", handler.settings)
+	router.Put("/api/channels/{channelID}/settings", handler.updateSettings)
+	if dependencies.NotificationsEnabled {
+		router.Put("/api/channels/{channelID}/notification", handler.updateNotification)
+	}
+	router.Post("/api/videos/{videoID}/watch-later", handler.saveLater)
+	router.Delete("/api/videos/{videoID}/watch-later", handler.removeLater)
+	router.Post("/api/videos/{videoID}/seen", handler.markSeen)
+}

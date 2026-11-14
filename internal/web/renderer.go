@@ -1,0 +1,157 @@
+package web
+
+import (
+	"embed"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"net/http"
+	"time"
+)
+
+//go:embed templates/*.html static/css/*.css static/img/*.svg static/js/*.js
+var assets embed.FS
+
+type Renderer struct {
+	templates *template.Template
+	static    http.Handler
+}
+
+type HomeData struct {
+	Version              string
+	BuildID              string
+	Page                 string
+	Channels             []ChannelCard
+	Categories           []CategoryGroup
+	Videos               []VideoCard
+	CurrentChannel       *ChannelCard
+	MissedCount          int
+	WatchLaterCount      int
+	NotificationsEnabled bool
+	Now                  time.Time
+}
+
+type ChannelCard struct {
+	ID, Title, ImageURL     string
+	BuildID                 string
+	CategoryID              int64
+	ThumbnailURLs           []string
+	VideoCount, UnseenCount int
+	IncludeLong             bool
+	IncludeShorts           bool
+	NotificationLevel       string
+}
+
+type CategoryGroup struct {
+	ID        int64
+	Name      string
+	IsDefault bool
+	Channels  []ChannelCard
+}
+type VideoCard struct {
+	ID, ChannelID, ChannelTitle, Title, URL, ThumbnailURL string
+	Published                                             time.Time
+	DurationSeconds                                       *int64
+	Unseen, WatchLater                                    bool
+}
+
+func New() (*Renderer, error) {
+	templates, err := template.New("index.html").Funcs(template.FuncMap{
+		"timeAgo": timeAgo, "thumbnailJSON": thumbnailJSON, "compactCount": compactCount,
+		"videoDuration": videoDuration, "notificationIcon": notificationIcon,
+		"notificationLabel": notificationLabel,
+	}).ParseFS(assets, "templates/*.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse templates: %w", err)
+	}
+	staticFiles, err := fs.Sub(assets, "static")
+	if err != nil {
+		return nil, fmt.Errorf("load static assets: %w", err)
+	}
+	return &Renderer{
+		templates: templates,
+		static:    http.FileServer(http.FS(staticFiles)),
+	}, nil
+}
+
+func notificationIcon(level string) string {
+	switch level {
+	case "low":
+		return "bell-electric"
+	case "medium":
+		return "disc-3"
+	case "critical":
+		return "dog"
+	default:
+		return "cloud-hail"
+	}
+}
+
+func notificationLabel(level string) string {
+	switch level {
+	case "low":
+		return "Wake Me Up Before You Go-Go!"
+	case "medium":
+		return "I Like to Move It!"
+	case "critical":
+		return "Who Let the Dogs Out?!"
+	default:
+		return "Off"
+	}
+}
+
+func videoDuration(seconds *int64) string {
+	if seconds == nil || *seconds <= 0 {
+		return ""
+	}
+	hours := *seconds / 3600
+	minutes := (*seconds % 3600) / 60
+	remainder := *seconds % 60
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, remainder)
+	}
+	return fmt.Sprintf("%02d:%02d", minutes, remainder)
+}
+
+func compactCount(value int) string {
+	if value > 99 {
+		return "99+"
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func thumbnailJSON(values []string) string {
+	encoded, _ := json.Marshal(values)
+	return string(encoded)
+}
+
+func (r *Renderer) RenderHome(writer http.ResponseWriter, data HomeData) error {
+	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	return r.templates.ExecuteTemplate(writer, "index.html", data)
+}
+
+func (r *Renderer) RenderContent(writer http.ResponseWriter, data HomeData) error {
+	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-store")
+	if err := r.templates.ExecuteTemplate(writer, "content", data); err != nil {
+		return err
+	}
+	return r.templates.ExecuteTemplate(writer, "dock-updates", data)
+}
+
+func (r *Renderer) Static() http.Handler {
+	return r.static
+}
+
+func timeAgo(value time.Time) string {
+	days := int(time.Since(value).Hours() / 24)
+	if days <= 0 {
+		return "Today"
+	}
+	if days == 1 {
+		return "Yesterday"
+	}
+	return fmt.Sprintf("%d days ago", days)
+}

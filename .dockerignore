@@ -1,0 +1,13 @@
+.git
+.github
+.hooks
+.local
+**/.env.example
+**/*.env
+Makefile
+Makefile.*
+bin
+data
+coverage.out
+coverage.html
+*.log

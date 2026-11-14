@@ -1,0 +1,202 @@
+{{define "content"}}
+<section class="page" data-page="{{.Page}}">
+  {{if eq .Page "home"}}
+    <div class="page-header">
+      <div>
+        <span class="eyebrow">YOUR DAILY BRAIN ROT</span>
+        <h1 class="page-title">Your channels</h1>
+        <p class="page-description">A carefully curated collection of people who don't know you exist.</p>
+      </div>
+      <div class="channel-search">
+        <label class="sr-only" for="channel-search">Search channels</label>
+        <input id="channel-search" type="search" placeholder="Search channels" oninput="window.tubyFilterChannels(this)">
+      </div>
+      <div class="section-meta">
+        {{len .Channels}} CHANNELS
+        <button class="inline-refresh" hx-post="/api/channels/fetch" hx-swap="none"
+          data-refresh-channels title="Refresh all channels">↻</button>
+      </div>
+    </div>
+    <div class="category-list">
+      {{range .Categories}}
+        <section class="channel-category" data-category-id="{{.ID}}">
+          <div class="category-heading">
+            <button class="category-toggle" type="button" aria-expanded="true"
+              data-open-icon="/static/img/carret-down.svg?v={{$.BuildID}}"
+              data-closed-icon="/static/img/carret-right.svg?v={{$.BuildID}}">
+              <img src="/static/img/carret-down.svg?v={{$.BuildID}}" alt="">
+              <span data-category-name>{{.Name}}</span>
+            </button>
+            <div class="category-actions">
+              {{if not .IsDefault}}
+                <button class="category-action" type="button" data-category-rename title="Rename {{.Name}}">
+                  <img src="/static/img/pencil.svg?v={{$.BuildID}}" alt="">
+                </button>
+                <button class="category-action" type="button" hx-delete="/api/categories/{{.ID}}"
+                  hx-confirm="Delete {{.Name}}? Its channels will be moved to the default category."
+                  hx-swap="none" data-success-message="Category deleted." title="Delete {{.Name}}">
+                  <img src="/static/img/trash.svg?v={{$.BuildID}}" alt="">
+                </button>
+              {{end}}
+            </div>
+            <img class="category-move" src="/static/img/arrow.svg?v={{$.BuildID}}" alt="">
+            {{if not .IsDefault}}
+              <form class="category-rename" action="/api/categories/{{.ID}}" hidden>
+                <label class="sr-only" for="category-name-{{.ID}}">Category name</label>
+                <input id="category-name-{{.ID}}" name="name" value="{{.Name}}" maxlength="50" required>
+                <div class="category-rename-actions">
+                  <button class="secondary-button" type="button" data-category-cancel>Cancel</button>
+                  <button class="primary-button" type="submit">Save</button>
+                </div>
+              </form>
+            {{end}}
+          </div>
+          <div class="category-divider"></div>
+          <div class="category-content">
+            <div class="channel-grid">
+              {{range .Channels}}
+                <article class="channel-card" data-channel-id="{{.ID}}">
+                  <img class="channel-move" src="/static/img/arrow.svg?v={{$.BuildID}}" alt="">
+                  <a href="/channels/{{.ID}}" hx-get="/channels/{{.ID}}" hx-target="#app" hx-push-url="true">
+                    <img class="channel-avatar" src="{{.ImageURL}}" data-channel-id="{{.ID}}"
+                      data-thumbnail-urls="{{thumbnailJSON .ThumbnailURLs}}" alt="">
+                    <div class="channel-name">{{.Title}}</div>
+                    <div class="channel-subline">
+                      {{if .UnseenCount}}<span class="status-dot"></span>{{.UnseenCount}} new video{{if ne .UnseenCount 1}}s{{end}}{{else}}All caught up{{end}}
+                    </div>
+                  </a>
+                  {{if $.NotificationsEnabled}}{{template "notification-picker" .}}{{end}}
+                  <button class="channel-delete" hx-delete="/api/channels/{{.ID}}"
+                    hx-confirm="Remove {{.Title}} and all its videos?" hx-swap="none"
+                    data-success-message="Channel deleted." title="Delete channel">
+                    <img src="/static/img/trash.svg?v={{$.BuildID}}" alt="">
+                  </button>
+                </article>
+              {{end}}
+            </div>
+            <div class="category-empty" {{if .Channels}}hidden{{end}}>No channels in this category.</div>
+          </div>
+        </section>
+      {{end}}
+    </div>
+    <div class="empty-state" id="channel-search-empty" hidden>
+      <h2>No matching channels</h2>
+      <p>Try another channel name.</p>
+    </div>
+    <dialog class="add-dialog category-dialog" id="category-dialog">
+      <form action="/api/categories" data-category-create>
+        <div class="dialog-heading">
+          <div><span class="eyebrow">ORGANIZE THE CHAOS</span><h2>New category</h2></div>
+          <button class="icon-button close-button" type="button" onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <label for="new-category-name">Category name</label>
+        <input id="new-category-name" name="name" maxlength="50" required autocomplete="off">
+        <span class="field-error" data-category-error hidden></span>
+        <div class="confirm-actions">
+          <button class="secondary-button" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+          <button class="primary-button" type="submit">Create</button>
+        </div>
+      </form>
+    </dialog>
+  {{else}}
+    {{if eq .Page "channel"}}
+      <a class="back-link" href="/">← All channels</a>
+      <div class="page-header">
+        <div>
+          <span class="eyebrow">CHANNEL</span>
+          <h1 class="page-title">{{.CurrentChannel.Title}}</h1>
+          <p class="page-description">Latest uploads, newest first.</p>
+        </div>
+        <div class="section-meta">
+          {{if .NotificationsEnabled}}{{template "notification-picker" .CurrentChannel}}{{end}}
+          {{.CurrentChannel.VideoCount}} VIDEOS
+          <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/fetch"
+            hx-swap="none" data-refresh-channels>↻</button>
+          <button class="inline-refresh" hx-post="/api/channels/{{.CurrentChannel.ID}}/seen"
+            hx-confirm="Mark every video from this channel as watched?" hx-swap="none" title="Mark channel as watched">
+            <img src="/static/img/seen.svg?v={{.BuildID}}" alt="">
+          </button>
+          <button class="inline-refresh" type="button"
+            onclick="document.querySelector('#channel-settings-dialog').showModal()" title="Channel settings">
+            <img src="/static/img/gear.svg?v={{.BuildID}}" alt="">
+          </button>
+        </div>
+      </div>
+      <dialog class="add-dialog" id="channel-settings-dialog">
+        <form hx-put="/api/channels/{{.CurrentChannel.ID}}/settings" hx-swap="none"
+          hx-disabled-elt="find button[type='submit']"
+          hx-on::after-request="if(event.detail.successful)this.closest('dialog').close()"
+          data-content-settings data-channel-settings>
+          <div class="dialog-heading">
+            <div><span class="eyebrow">CHANNEL SETTINGS</span><h2>{{.CurrentChannel.Title}}</h2></div>
+            <button class="icon-button close-button" type="button" onclick="this.closest('dialog').close()">×</button>
+          </div>
+          <div class="category-field">
+            <label for="settings-category">Category</label>
+            <div class="category-select-row">
+              <select class="category-select" id="settings-category" name="category_id" data-category-select required>
+                {{range .Categories}}<option value="{{.ID}}" {{if eq .ID $.CurrentChannel.CategoryID}}selected{{end}}>{{.Name}}</option>{{end}}
+              </select>
+            </div>
+          </div>
+          <fieldset class="content-options">
+            <legend>Content types</legend>
+            <label class="content-option"><input type="checkbox" name="include_long" {{if .CurrentChannel.IncludeLong}}checked{{end}}><span>Long</span></label>
+            <label class="content-option"><input type="checkbox" name="include_shorts" {{if .CurrentChannel.IncludeShorts}}checked{{end}}><span>Shorts</span></label>
+          </fieldset>
+          <span class="field-error modal-action-error" role="alert" aria-live="polite"
+            data-channel-settings-error hidden></span>
+          <div class="confirm-actions">
+            <button class="secondary-button" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+            <button class="primary-button" type="submit">Save</button>
+          </div>
+        </form>
+      </dialog>
+    {{else if eq .Page "missed"}}
+      <div class="page-header">
+        <div><span class="eyebrow">LIFE HAPPENED. HOW UNFORTUNATE.</span><h1 class="page-title">Missed</h1></div>
+        <div class="section-meta">{{len .Videos}} UNOPENED</div>
+      </div>
+    {{else}}
+      <div class="page-header">
+        <div><span class="eyebrow">THE GRAVEYARD OF GOOD INTENTIONS</span><h1 class="page-title">Watch later</h1></div>
+        <div class="section-meta">{{len .Videos}} SAVED</div>
+      </div>
+    {{end}}
+    {{if .Videos}}
+      <div class="video-grid">
+        {{range .Videos}}
+          <article class="video-card" data-video-id="{{.ID}}" data-unseen="{{.Unseen}}">
+            <div class="video-media">
+              <a class="video-link" href="{{.URL}}" target="_blank">
+                <img class="video-thumb" src="{{.ThumbnailURL}}" alt="" loading="lazy">
+              </a>
+              {{if .Unseen}}
+                <button class="seen-button" hx-post="/api/videos/{{.ID}}/seen" hx-swap="none" title="Mark as seen">
+                  <img src="/static/img/seen.svg?v={{$.BuildID}}" alt="">
+                </button>
+              {{end}}
+              <button class="bookmark-button" {{if .WatchLater}}hx-delete{{else}}hx-post{{end}}="/api/videos/{{.ID}}/watch-later" hx-swap="none">
+                <img src="/static/img/bookmark.svg?v={{$.BuildID}}" alt="">
+              </button>
+              <button class="duration-button" hx-post="/api/videos/{{.ID}}/duration" hx-swap="none"
+                hx-disabled-elt="this" title="Fetch video duration">
+                <img src="/static/img/timer.svg?v={{$.BuildID}}" alt="">
+              </button>
+              {{if .Unseen}}<span class="new-pill">NEW</span>{{end}}
+            </div>
+            <a class="video-title" href="{{.URL}}" target="_blank">{{.Title}}</a>
+            <div class="video-footer">
+              <div class="video-meta">{{.ChannelTitle}} · {{timeAgo .Published}}</div>
+              {{if .DurationSeconds}}<time class="video-duration">{{videoDuration .DurationSeconds}}</time>{{end}}
+            </div>
+          </article>
+        {{end}}
+      </div>
+    {{else}}
+      <div class="empty-state"><h2>All caught up</h2><p>Nothing left here. Enjoy the quiet.</p></div>
+    {{end}}
+  {{end}}
+</section>
+<script>document.querySelectorAll('.dock-link').forEach(function(link){var page='{{.Page}}';var active=(link.getAttribute('href')==='/'&&page==='home')||(link.getAttribute('href')==='/missed'&&page==='missed')||(link.getAttribute('href')==='/watch-later'&&page==='later');link.classList.toggle('is-active',active)});</script>
+{{end}}

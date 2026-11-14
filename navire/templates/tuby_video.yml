@@ -1,0 +1,37 @@
+---
+# Copy this file into the directory mounted as NAVIRE_TEMPLATES_DIR.
+# The provider and endpoint below must match an enabled endpoint in Navire.
+key: tuby_video
+name: Tuby new video notifications
+description: New eligible YouTube videos discovered by Tuby.
+
+variants:
+  new_video:
+    state: informational
+    priority: normal
+    title: "Tuby · Emergency brain rot delivery"
+    body: |
+      **Channel:** `{{ .channel_name }}`
+      **Video:** {{ .video_title }}
+
+  new_video_with_message:
+    state: informational
+    priority: normal
+    title: "Tuby · Emergency brain rot delivery"
+    body: |
+      **Channel:** `{{ .channel_name }}`
+      **Video:** {{ .video_title }}
+
+      {{ .message }}
+
+providers:
+  defaults:
+    timeout: 5s
+    retry:
+      backoff: exponential
+      max_attempts: 3
+      initial_wait: 5s
+  gotify:
+    endpoints:
+      your-endpoint: {}
+
